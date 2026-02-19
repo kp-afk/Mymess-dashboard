@@ -1,190 +1,572 @@
+/**
+ * Complaints.tsx — Redesigned Admin Complaints Dashboard
+ * Aesthetic: Matches Ratings.tsx "Observatory" dark analytics style
+ */
 
-import React, { useState } from 'react';
-import { Search, CheckCircle2, AlertCircle, Clock, Database } from 'lucide-react';
+import React, { useState, useMemo, useCallback } from 'react';
+import {
+  Search, CheckCircle2, AlertCircle, Clock, Database,
+  ChevronDown, ChevronRight, X, Filter, Inbox,
+  MessageSquare, User, Calendar, Tag, ArrowRight
+} from 'lucide-react';
 import { Complaint, ComplaintStatus } from '../types';
 import { db } from '../lib/firebase';
 
-const StatusBadge = ({ status }: { status: ComplaintStatus }) => {
-  const styles = {
-    'Pending': 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400 border-red-200 dark:border-red-800',
-    'In Progress': 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400 border-yellow-200 dark:border-yellow-800',
-    'Resolved': 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800',
-  };
-  return <span className={`px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-widest border ${styles[status]}`}>{status}</span>;
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface ComplaintsProps { liveComplaints: Complaint[] }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const STATUS_ORDER: ComplaintStatus[] = ['Pending', 'In Progress', 'Resolved'];
+
+const STATUS_CONFIG: Record<ComplaintStatus, {
+  color: string; bg: string; border: string;
+  icon: React.ReactNode; accent: string; dimmed: string;
+}> = {
+  'Pending': {
+    color: '#f87171', bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.25)',
+    accent: '#ef4444', dimmed: 'rgba(239,68,68,0.15)',
+    icon: <AlertCircle size={14} />,
+  },
+  'In Progress': {
+    color: '#fbbf24', bg: 'rgba(251,191,36,0.10)', border: 'rgba(251,191,36,0.25)',
+    accent: '#f59e0b', dimmed: 'rgba(245,158,11,0.15)',
+    icon: <Clock size={14} />,
+  },
+  'Resolved': {
+    color: '#34d399', bg: 'rgba(52,211,153,0.10)', border: 'rgba(52,211,153,0.25)',
+    accent: '#10b981', dimmed: 'rgba(16,185,129,0.15)',
+    icon: <CheckCircle2 size={14} />,
+  },
 };
 
-interface ComplaintsProps {
-  liveComplaints: Complaint[];
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function formatTs(ts: number | string | undefined): string {
+  if (!ts) return '—';
+  try {
+    const d = new Date(typeof ts === 'string' ? ts : ts);
+    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch { return '—'; }
 }
 
-export default function Complaints({ liveComplaints }: ComplaintsProps) {
-  const [filter, setFilter] = useState('All');
-  const [search, setSearch] = useState('');
+function timeAgo(ts: number | undefined): string {
+  if (!ts) return '';
+  const diff = Date.now() - ts;
+  const m = Math.floor(diff / 60000);
+  if (m < 1) return 'just now';
+  if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h ago`;
+  const d = Math.floor(h / 24);
+  return `${d}d ago`;
+}
 
-  const filteredComplaints = liveComplaints.filter(c => {
-    const matchesFilter = filter === 'All' || c.status === filter;
-    const matchesSearch = c.userName.toLowerCase().includes(search.toLowerCase()) || 
-                         c.complaintText.toLowerCase().includes(search.toLowerCase());
-    return matchesFilter && matchesSearch;
-  });
+// ─── Firebase updater ─────────────────────────────────────────────────────────
 
-  const handleStatusChange = async (id: string, next: ComplaintStatus) => {
-    try {
-      await db.collection("complaints").doc(id).update({
-        status: next,
-        updatedAt: Date.now()
-      });
-    } catch (err: any) {
-      console.error("Failed to update status:", err);
-      if (err.code === 'permission-denied') {
-        alert("ACCESS DENIED: You are not authorized to update complaints.\n\nPlease add your UID to the 'admins' collection in Firestore.");
-      } else {
-        alert("Failed to update status. Check console for details.");
-      }
-    }
-  };
+async function updateStatus(id: string, next: ComplaintStatus): Promise<void> {
+  await db.collection('complaints').doc(id).update({ status: next, updatedAt: Date.now() });
+}
 
+// ─── Sub-components ───────────────────────────────────────────────────────────
+
+function StatusPill({ status }: { status: ComplaintStatus }) {
+  const cfg = STATUS_CONFIG[status];
   return (
-    <div className="space-y-6 animate-in slide-in-from-bottom-4 duration-500">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold dark:text-white">Complaints Management</h1>
-          <p className="text-slate-500 dark:text-slate-400">Live feed from Firestore <code>complaints/</code> collection.</p>
-        </div>
-        
-        <div className="flex items-center gap-2">
-          <div className="flex bg-white dark:bg-slate-800 border dark:border-slate-700 rounded-xl p-1 shadow-sm">
-            {['All', 'Pending', 'In Progress', 'Resolved'].map(s => (
-              <button 
-                key={s}
-                onClick={() => setFilter(s)}
-                className={`px-4 py-1.5 rounded-lg text-xs font-black uppercase tracking-widest transition-all ${
-                  filter === s ? 'bg-blue-600 text-white shadow-lg' : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
-                }`}
-              >
-                {s}
-              </button>
-            ))}
-          </div>
-        </div>
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '3px 10px', borderRadius: 20,
+      background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
+      fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
+      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+      whiteSpace: 'nowrap',
+    }}>
+      {cfg.icon} {status}
+    </span>
+  );
+}
+
+function CategoryPill({ category }: { category: string }) {
+  return (
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 5,
+      padding: '3px 9px', borderRadius: 6,
+      background: 'rgba(99,102,241,0.12)', color: '#818cf8',
+      border: '1px solid rgba(99,102,241,0.22)',
+      fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
+      letterSpacing: '0.07em',
+      fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace",
+    }}>
+      <Tag size={9} /> {category}
+    </span>
+  );
+}
+
+function KpiCard({ icon, label, value, accent, sub }: {
+  icon: React.ReactNode; label: string; value: number; accent: string; sub?: string;
+}) {
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.03)', border: `1px solid rgba(255,255,255,0.07)`,
+      borderRadius: 16, padding: '20px 24px', position: 'relative', overflow: 'hidden',
+    }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${accent}, transparent)` }} />
+      <div style={{ display: 'inline-flex', padding: 8, background: `${accent}1a`, borderRadius: 10, color: accent, marginBottom: 14 }}>
+        {icon}
       </div>
+      <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#64748b', marginBottom: 6, fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>{label}</p>
+      <p style={{ fontSize: 30, fontWeight: 800, color: '#f8fafc', lineHeight: 1, fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", margin: 0 }}>
+        {value}
+        {sub && <span style={{ fontSize: 13, fontWeight: 400, color: '#64748b', marginLeft: 6 }}>{sub}</span>}
+      </p>
+    </div>
+  );
+}
 
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border dark:border-slate-700 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-red-100 text-red-600 dark:bg-red-900/30 dark:text-red-400 flex items-center justify-center">
-            <AlertCircle size={24} />
-          </div>
-          <div>
-            <p className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-widest">Pending</p>
-            <p className="text-3xl font-black dark:text-white">{liveComplaints.filter(c => c.status === 'Pending').length}</p>
-          </div>
-        </div>
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border dark:border-slate-700 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-yellow-100 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400 flex items-center justify-center">
-            <Clock size={24} />
-          </div>
-          <div>
-            <p className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-widest">In Progress</p>
-            <p className="text-3xl font-black dark:text-white">{liveComplaints.filter(c => c.status === 'In Progress').length}</p>
-          </div>
-        </div>
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border dark:border-slate-700 shadow-sm flex items-center gap-4">
-          <div className="w-12 h-12 rounded-full bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400 flex items-center justify-center">
-            <CheckCircle2 size={24} />
-          </div>
-          <div>
-            <p className="text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-widest">Resolved</p>
-            <p className="text-3xl font-black dark:text-white">{liveComplaints.filter(c => c.status === 'Resolved').length}</p>
-          </div>
-        </div>
-      </div>
+// ─── Confirm Modal ────────────────────────────────────────────────────────────
 
-      <div className="bg-white dark:bg-slate-800 rounded-3xl border dark:border-slate-700 shadow-sm overflow-hidden">
-        <div className="p-6 border-b dark:border-slate-700 flex items-center gap-4">
-          <div className="relative flex-1">
-            <Search size={18} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
-            <input 
-              type="text" 
-              placeholder="Search by student or text..." 
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full bg-slate-50 dark:bg-slate-700 dark:text-white border dark:border-slate-600 rounded-xl py-2.5 pl-10 pr-4 outline-none focus:ring-2 focus:ring-blue-500 transition-all"
-            />
-          </div>
-          <div className="flex items-center gap-2 text-xs text-slate-400 font-bold uppercase tracking-widest bg-slate-50 dark:bg-slate-700 px-4 py-2.5 rounded-xl border dark:border-slate-600">
-             <Database size={16} /> Syncing
-          </div>
-        </div>
+function ConfirmResolveModal({ complaint, onConfirm, onCancel }: {
+  complaint: Complaint;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      onClick={onCancel}
+      style={{
+        position: 'fixed', inset: 0, zIndex: 50,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        padding: 16, background: 'rgba(2,6,23,0.80)', backdropFilter: 'blur(6px)',
+        animation: 'fadeIn 0.15s ease',
+      }}
+    >
+      <div
+        onClick={e => e.stopPropagation()}
+        style={{
+          background: '#0f172a', borderRadius: 18, width: '100%', maxWidth: 420,
+          border: '1px solid rgba(52,211,153,0.25)',
+          boxShadow: '0 0 0 1px rgba(52,211,153,0.08), 0 24px 48px rgba(0,0,0,0.6)',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Green top strip */}
+        <div style={{ height: 3, background: 'linear-gradient(90deg, #10b981, transparent)' }} />
 
-        <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead>
-              <tr className="bg-slate-50 dark:bg-slate-700/50 border-b dark:border-slate-700">
-                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Student</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Category</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Description</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Status</th>
-                <th className="px-6 py-4 text-[10px] font-black uppercase tracking-widest text-slate-400">Actions</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y dark:divide-slate-700">
-              {filteredComplaints.length > 0 ? filteredComplaints.map((complaint) => (
-                <tr key={complaint.id} className="hover:bg-slate-50/50 dark:hover:bg-slate-700/30 transition-colors group">
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-3">
-                      <div className="w-8 h-8 rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400 flex items-center justify-center text-xs font-black">
-                        {complaint.userName.charAt(0)}
-                      </div>
-                      <div className="min-w-0">
-                        <p className="text-sm font-bold dark:text-slate-200 truncate">{complaint.userName}</p>
-                        <p className="text-[10px] text-slate-400 truncate">{complaint.userEmail}</p>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-6 py-4">
-                    <span className="text-[10px] font-bold px-2 py-1 bg-slate-100 dark:bg-slate-700 rounded text-slate-500 dark:text-slate-400 uppercase tracking-tighter">
-                      {complaint.category}
-                    </span>
-                  </td>
-                  <td className="px-6 py-4">
-                    <p className="text-sm text-slate-600 dark:text-slate-400 line-clamp-1 max-w-xs">{complaint.complaintText}</p>
-                  </td>
-                  <td className="px-6 py-4">
-                    <StatusBadge status={complaint.status} />
-                  </td>
-                  <td className="px-6 py-4">
-                    <div className="flex items-center gap-1">
-                      {complaint.status !== 'Resolved' && (
-                        <button 
-                          onClick={() => handleStatusChange(complaint.id, 'Resolved')}
-                          className="px-3 py-1.5 bg-green-50 text-green-600 hover:bg-green-600 hover:text-white dark:bg-green-900/20 dark:text-green-400 dark:hover:bg-green-600 dark:hover:text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all"
-                        >
-                          Resolve
-                        </button>
-                      )}
-                      {complaint.status === 'Pending' && (
-                        <button 
-                          onClick={() => handleStatusChange(complaint.id, 'In Progress')}
-                          className="px-3 py-1.5 bg-yellow-50 text-yellow-600 hover:bg-yellow-600 hover:text-white dark:bg-yellow-900/20 dark:text-yellow-400 dark:hover:bg-yellow-600 dark:hover:text-white rounded-lg text-xs font-black uppercase tracking-widest transition-all"
-                        >
-                          Progress
-                        </button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              )) : (
-                <tr>
-                  <td colSpan={5} className="px-6 py-20 text-center text-slate-400">
-                    <Database size={32} className="mx-auto mb-2 opacity-10" />
-                    <p className="font-medium uppercase text-xs tracking-widest">No complaints found matching criteria.</p>
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+        <div style={{ padding: '24px 26px' }}>
+          {/* Icon + heading */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
+            <div style={{
+              width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+              background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.3)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#34d399',
+            }}>
+              <CheckCircle2 size={18} />
+            </div>
+            <div>
+              <p style={{ fontSize: 15, fontWeight: 700, color: '#f1f5f9', margin: '0 0 2px' }}>Mark as Resolved?</p>
+              <p style={{ fontSize: 12, color: '#64748b', margin: 0 }}>This will move the complaint out of the active queue.</p>
+            </div>
+          </div>
+
+          {/* Complaint preview */}
+          <div style={{
+            background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
+            borderRadius: 10, padding: '12px 14px', marginBottom: 22,
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>{complaint.userName}</span>
+              <CategoryPill category={complaint.category} />
+            </div>
+            <p style={{
+              fontSize: 12, color: '#94a3b8', margin: 0, lineHeight: 1.55,
+              display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+            }}>
+              {complaint.complaintText}
+            </p>
+          </div>
+
+          {/* Buttons */}
+          <div style={{ display: 'flex', gap: 10 }}>
+            <button
+              onClick={onCancel}
+              style={{
+                flex: 1, padding: '10px 0', borderRadius: 10,
+                background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
+                color: '#94a3b8', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                transition: 'all 0.15s',
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.09)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'; }}
+            >
+              Cancel
+            </button>
+            <button
+              onClick={onConfirm}
+              style={{
+                flex: 1, padding: '10px 0', borderRadius: 10,
+                background: 'rgba(16,185,129,0.18)', border: '1px solid rgba(52,211,153,0.4)',
+                color: '#34d399', fontSize: 13, fontWeight: 700, cursor: 'pointer',
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+              }}
+              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(16,185,129,0.28)'; }}
+              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(16,185,129,0.18)'; }}
+            >
+              <CheckCircle2 size={13} /> Confirm Resolve
+            </button>
+          </div>
         </div>
       </div>
     </div>
+  );
+}
+
+// ─── Complaint Card ───────────────────────────────────────────────────────────
+
+function ComplaintCard({ complaint, onStatusChange }: {
+  complaint: Complaint;
+  onStatusChange: (id: string, next: ComplaintStatus) => Promise<void>;
+}) {
+  const [expanded, setExpanded] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [confirmPending, setConfirmPending] = useState(false);
+  const cfg = STATUS_CONFIG[complaint.status];
+
+  const handleAction = async (next: ComplaintStatus) => {
+    setLoading(true);
+    try { await onStatusChange(complaint.id, next); }
+    catch (err: any) {
+      console.error(err);
+      alert(err.code === 'permission-denied'
+        ? 'ACCESS DENIED: You are not authorized to update complaints.'
+        : 'Failed to update status. Check console for details.');
+    } finally { setLoading(false); }
+  };
+
+  const isLong = complaint.complaintText?.length > 120;
+
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.02)',
+      border: `1px solid ${complaint.status === 'Pending' ? cfg.border : 'rgba(255,255,255,0.07)'}`,
+      borderRadius: 12, overflow: 'hidden',
+      transition: 'border-color 0.2s',
+      opacity: complaint.status === 'Resolved' ? 0.65 : 1,
+    }}>
+      {/* Top accent for Pending */}
+      {complaint.status === 'Pending' && (
+        <div style={{ height: 2, background: `linear-gradient(90deg, ${cfg.accent}, transparent)` }} />
+      )}
+
+      <div style={{ padding: '14px 18px' }}>
+        {/* Row 1: User + meta + status + actions */}
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+          {/* Avatar */}
+          <div style={{
+            width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
+            background: cfg.dimmed, border: `1px solid ${cfg.border}`,
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            color: cfg.color, fontSize: 13, fontWeight: 800,
+            fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace",
+          }}>
+            {complaint.userName?.charAt(0)?.toUpperCase() ?? '?'}
+          </div>
+
+          {/* Name + email + time */}
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 3 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>{complaint.userName}</span>
+              <CategoryPill category={complaint.category} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 11, color: '#475569', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>{complaint.userEmail}</span>
+              {complaint.timestamp && (
+                <>
+                  <span style={{ color: '#1e293b', fontSize: 10 }}>·</span>
+                  <span style={{ fontSize: 10, color: '#475569', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }} title={formatTs(complaint.timestamp)}>
+                    {timeAgo(complaint.timestamp)}
+                  </span>
+                </>
+              )}
+            </div>
+          </div>
+
+          {/* Status + action buttons */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <StatusPill status={complaint.status} />
+            {complaint.status === 'Pending' && (
+              <button onClick={() => handleAction('In Progress')} disabled={loading} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '5px 12px', borderRadius: 8, border: `1px solid rgba(251,191,36,0.3)`,
+                background: 'rgba(251,191,36,0.1)', color: '#fbbf24',
+                fontSize: 11, fontWeight: 700, cursor: loading ? 'wait' : 'pointer',
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                transition: 'all 0.15s',
+              }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(251,191,36,0.22)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(251,191,36,0.1)'; }}
+              >
+                <ArrowRight size={11} /> Start
+              </button>
+            )}
+            {complaint.status !== 'Resolved' && (
+              <button onClick={() => setConfirmPending(true)} disabled={loading} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 5,
+                padding: '5px 12px', borderRadius: 8, border: `1px solid rgba(52,211,153,0.3)`,
+                background: 'rgba(52,211,153,0.1)', color: '#34d399',
+                fontSize: 11, fontWeight: 700, cursor: loading ? 'wait' : 'pointer',
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                transition: 'all 0.15s',
+              }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(52,211,153,0.22)'; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(52,211,153,0.1)'; }}
+              >
+                <CheckCircle2 size={11} /> Resolve
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Row 2: Complaint text */}
+        <div style={{ marginTop: 12, paddingLeft: 46 }}>
+          <p style={{
+            fontSize: 13, color: '#94a3b8', lineHeight: 1.6, margin: 0,
+            display: '-webkit-box', WebkitLineClamp: expanded ? 'unset' : 2,
+            WebkitBoxOrient: 'vertical', overflow: expanded ? 'visible' : 'hidden',
+          }}>
+            {complaint.complaintText}
+          </p>
+          {isLong && (
+            <button onClick={() => setExpanded(p => !p)} style={{
+              marginTop: 6, background: 'none', border: 'none', cursor: 'pointer',
+              color: '#4f86f7', fontSize: 11, fontWeight: 600, padding: 0,
+              display: 'flex', alignItems: 'center', gap: 3,
+              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            }}>
+              {expanded ? 'Show less' : 'Read more'}
+              <ChevronDown size={11} style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+            </button>
+          )}
+        </div>
+      </div>
+
+      {confirmPending && (
+        <ConfirmResolveModal
+          complaint={complaint}
+          onConfirm={() => { setConfirmPending(false); handleAction('Resolved'); }}
+          onCancel={() => setConfirmPending(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+// ─── Status Group ─────────────────────────────────────────────────────────────
+
+function StatusGroup({ status, complaints, onStatusChange, defaultOpen }: {
+  status: ComplaintStatus;
+  complaints: Complaint[];
+  onStatusChange: (id: string, next: ComplaintStatus) => Promise<void>;
+  defaultOpen: boolean;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  const cfg = STATUS_CONFIG[status];
+
+  return (
+    <div style={{ borderRadius: 14, overflow: 'hidden', border: `1px solid ${open ? cfg.border : 'rgba(255,255,255,0.07)'}`, transition: 'border-color 0.2s' }}>
+      {/* Group header */}
+      <button onClick={() => setOpen(p => !p)} style={{
+        width: '100%', display: 'flex', alignItems: 'center', gap: 12,
+        padding: '14px 20px', background: open ? cfg.bg : 'rgba(255,255,255,0.02)',
+        border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background 0.2s',
+      }}>
+        <span style={{ color: cfg.color }}>{cfg.icon}</span>
+        <span style={{ fontWeight: 700, fontSize: 14, color: '#f1f5f9' }}>{status}</span>
+        <span style={{
+          fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace",
+          fontSize: 11, fontWeight: 700,
+          padding: '2px 9px', borderRadius: 20,
+          background: cfg.dimmed, color: cfg.color,
+          border: `1px solid ${cfg.border}`,
+        }}>
+          {complaints.length}
+        </span>
+        <ChevronDown size={15} color="#64748b" style={{ marginLeft: 'auto', transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'none' }} />
+      </button>
+
+      {/* Cards */}
+      {open && (
+        <div style={{ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(0,0,0,0.15)' }}>
+          {complaints.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '28px 0', color: '#334155', fontSize: 12 }}>No {status.toLowerCase()} complaints.</div>
+          ) : (
+            complaints.map(c => (
+              <ComplaintCard key={c.id} complaint={c} onStatusChange={onStatusChange} />
+            ))
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+export default function Complaints({ liveComplaints }: ComplaintsProps) {
+  const [search, setSearch] = useState('');
+  const [selectedCategory, setSelectedCategory] = useState('All');
+
+  const categories = useMemo(() => {
+    const cats = [...new Set(liveComplaints.map(c => c.category).filter(Boolean))].sort();
+    return ['All', ...cats];
+  }, [liveComplaints]);
+
+  const handleStatusChange = useCallback(async (id: string, next: ComplaintStatus) => {
+    await updateStatus(id, next);
+  }, []);
+
+  // Filter
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase();
+    return liveComplaints.filter(c => {
+      if (selectedCategory !== 'All' && c.category !== selectedCategory) return false;
+      if (q && !c.userName?.toLowerCase().includes(q) && !c.complaintText?.toLowerCase().includes(q) && !c.category?.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [liveComplaints, search, selectedCategory]);
+
+  // Group by status, each group sorted newest-first
+  const grouped = useMemo(() => {
+    const map: Record<ComplaintStatus, Complaint[]> = { 'Pending': [], 'In Progress': [], 'Resolved': [] };
+    for (const c of filtered) {
+      if (map[c.status as ComplaintStatus]) map[c.status as ComplaintStatus].push(c);
+    }
+    // Pending & In Progress: oldest first (most overdue at top)
+    // Resolved: newest first (most recently closed at top)
+    map['Pending'].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+    map['In Progress'].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+    map['Resolved'].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
+    return map;
+  }, [filtered]);
+
+  const counts = useMemo(() => ({
+    pending:    liveComplaints.filter(c => c.status === 'Pending').length,
+    inProgress: liveComplaints.filter(c => c.status === 'In Progress').length,
+    resolved:   liveComplaints.filter(c => c.status === 'Resolved').length,
+  }), [liveComplaints]);
+
+  const resolutionRate = liveComplaints.length
+    ? Math.round((counts.resolved / liveComplaints.length) * 100) : 0;
+
+  return (
+    <>
+      <style>{`@keyframes fadeIn { from { opacity:0 } to { opacity:1 } }`}</style>
+
+      <div style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: '#f1f5f9', minHeight: '100%', animation: 'fadeIn 0.3s ease' }}>
+
+        {/* Page Header */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 28 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              <div style={{ display: 'inline-flex', padding: 8, background: 'rgba(248,113,113,0.15)', borderRadius: 10, color: '#f87171' }}>
+                <MessageSquare size={18} />
+              </div>
+              <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0, letterSpacing: '-0.02em', color: '#f8fafc' }}>
+                Complaints
+              </h1>
+            </div>
+            <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
+              Live feed from Firestore · {liveComplaints.length} total ·&nbsp;
+              <span style={{ color: resolutionRate >= 70 ? '#34d399' : resolutionRate >= 40 ? '#fbbf24' : '#f87171', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontWeight: 700 }}>{resolutionRate}%</span>
+              &nbsp;resolved
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 10 }}>
+            <Database size={13} color="#10b981" />
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#10b981', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", textTransform: 'uppercase', letterSpacing: '0.08em' }}>Live</span>
+          </div>
+        </div>
+
+        {/* KPI Cards */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 14, marginBottom: 28 }}>
+          <KpiCard icon={<AlertCircle size={18} />}  label="Pending"     value={counts.pending}    accent="#ef4444" />
+          <KpiCard icon={<Clock size={18} />}         label="In Progress" value={counts.inProgress} accent="#f59e0b" />
+          <KpiCard icon={<CheckCircle2 size={18} />}  label="Resolved"    value={counts.resolved}   accent="#10b981" />
+          <KpiCard icon={<MessageSquare size={18} />} label="Total"       value={liveComplaints.length} accent="#818cf8" sub={`· ${resolutionRate}% resolved`} />
+        </div>
+
+        {/* Search + Category filter bar */}
+        <div style={{
+          display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center',
+          padding: '14px 18px', background: 'rgba(255,255,255,0.03)',
+          border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, marginBottom: 24,
+        }}>
+          {/* Search */}
+          <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+            <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#475569' }} />
+            <input
+              type="text" placeholder="Search by name, category or text…"
+              value={search} onChange={e => setSearch(e.target.value)}
+              style={{
+                width: '100%', background: 'rgba(255,255,255,0.05)',
+                border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9,
+                padding: '8px 12px 8px 34px', color: '#f1f5f9', fontSize: 13, outline: 'none',
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+
+          {/* Category pills */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <Filter size={13} color="#475569" />
+            {categories.map(cat => {
+              const active = selectedCategory === cat;
+              return (
+                <button key={cat} onClick={() => setSelectedCategory(cat)} style={{
+                  padding: '5px 12px', borderRadius: 20,
+                  border: `1px solid ${active ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.08)'}`,
+                  background: active ? 'rgba(99,102,241,0.15)' : 'transparent',
+                  color: active ? '#818cf8' : '#64748b',
+                  fontSize: 11, fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s',
+                  textTransform: 'uppercase', letterSpacing: '0.06em',
+                  fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace",
+                }}>
+                  {cat}
+                </button>
+              );
+            })}
+          </div>
+
+          <span style={{ marginLeft: 'auto', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 11, color: '#475569', whiteSpace: 'nowrap' }}>
+            {filtered.length !== liveComplaints.length
+              ? <><span style={{ color: '#f1f5f9', fontWeight: 700 }}>{filtered.length}</span> / {liveComplaints.length}</>
+              : <span style={{ color: '#f1f5f9', fontWeight: 700 }}>{liveComplaints.length} complaints</span>}
+          </span>
+        </div>
+
+        {/* Grouped complaint lists */}
+        {filtered.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '60px 0', color: '#334155' }}>
+            <Inbox size={42} style={{ margin: '0 auto 14px', opacity: 0.2 }} />
+            <p style={{ fontSize: 14 }}>No complaints match your filters.</p>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            {STATUS_ORDER.map(status => (
+              <StatusGroup
+                key={status}
+                status={status}
+                complaints={grouped[status]}
+                onStatusChange={handleStatusChange}
+                defaultOpen={status !== 'Resolved'}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+    </>
   );
 }

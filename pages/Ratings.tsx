@@ -1,385 +1,968 @@
+/**
+ * Ratings.tsx — Redesigned Admin Ratings Dashboard
+ * Aesthetic: Refined dark analytics ("Observatory" style)
+ * Typography: Syne (headings) + IBM Plex Mono (numbers)
+ */
 
-import React, { useState, useMemo } from 'react';
-import { Star, Pizza, Heart, ShieldCheck, Database, Clock, BarChart3, ChevronRight, X } from 'lucide-react';
+import React, { useState, useMemo, useCallback } from 'react';
+import {
+  Star, Pizza, Heart, ShieldCheck, Clock, BarChart3, ChevronRight, X,
+  ChevronDown, TrendingUp, TrendingDown, Users, Calendar, Coffee,
+  Sun, Moon, AlertTriangle, Filter, Database, Minus
+} from 'lucide-react';
 import type { Rating, MealType } from '../types';
 import { dateToDayName, getDaySortIndex, getMealSortIndex, MEAL_ORDER } from '../lib/menuUtils';
 
-interface RatingsProps {
-  liveRatings: Rating[];
+// ─── Types ────────────────────────────────────────────────────────────────────
+
+interface RatingsProps { liveRatings: Rating[] }
+
+type TabId = 'timeline' | 'performance' | 'users';
+
+interface MealGroup { key: string; date: string; day: string; meal: MealType; items: Rating[]; avg: number }
+
+interface DateGroup { date: string; day: string; meals: MealGroup[] }
+
+// ─── Constants ────────────────────────────────────────────────────────────────
+
+const MEALS: MealType[] = ['Breakfast', 'Lunch', 'Dinner'];
+
+const MEAL_ICONS: Record<MealType, React.ReactNode> = {
+  Breakfast: <Coffee size={13} />,
+  Lunch:     <Sun    size={13} />,
+  Dinner:    <Moon   size={13} />,
+};
+
+const MEAL_COLORS: Record<MealType, { bg: string; text: string; border: string }> = {
+  Breakfast: { bg: 'rgba(251,191,36,0.12)',  text: '#fbbf24', border: 'rgba(251,191,36,0.3)'  },
+  Lunch:     { bg: 'rgba(52,211,153,0.12)',  text: '#34d399', border: 'rgba(52,211,153,0.3)'  },
+  Dinner:    { bg: 'rgba(139,92,246,0.12)', text: '#a78bfa', border: 'rgba(139,92,246,0.3)' },
+};
+
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+
+function ratingColor(val: number): string {
+  if (val >= 4.5) return '#10b981';
+  if (val >= 4.0) return '#34d399';
+  if (val >= 3.5) return '#fbbf24';
+  if (val >= 3.0) return '#f59e0b';
+  if (val >= 2.0) return '#f97316';
+  return '#f43f5e';
 }
 
-/** Sort ratings by day of week (Sun–Sat) then by meal (Breakfast, Lunch, Dinner) per menu */
-function sortRatingsByMenu(ratings: Rating[]): Rating[] {
-  return [...ratings].sort((a, b) => {
-    const dayA = dateToDayName(a.mealDate ?? '');
-    const dayB = dateToDayName(b.mealDate ?? '');
-    const dayDiff = getDaySortIndex(dayA) - getDaySortIndex(dayB);
-    if (dayDiff !== 0) return dayDiff;
-    const mealDiff = getMealSortIndex(a.mealName ?? '') - getMealSortIndex(b.mealName ?? '');
-    if (mealDiff !== 0) return mealDiff;
-    return (b.timestamp ?? 0) - (a.timestamp ?? 0);
-  });
+function ratingLabel(val: number): string {
+  if (val >= 4.5) return 'Excellent';
+  if (val >= 4.0) return 'Good';
+  if (val >= 3.5) return 'Above Avg';
+  if (val >= 3.0) return 'Average';
+  if (val >= 2.0) return 'Below Avg';
+  return 'Poor';
 }
 
-/** Group ratings by date+meal for easier browsing, sorted by date desc then meal order */
-function groupRatingsByDayMeal(ratings: Rating[]): { key: string; day: string; meal: string; date: string; items: Rating[] }[] {
-  const map = new Map<string, Rating[]>();
+function heatmapBg(val: number | null): string {
+  if (val === null) return 'rgba(255,255,255,0.03)';
+  if (val >= 4.5) return 'rgba(16,185,129,0.28)';
+  if (val >= 4.0) return 'rgba(16,185,129,0.16)';
+  if (val >= 3.5) return 'rgba(251,191,36,0.22)';
+  if (val >= 3.0) return 'rgba(245,158,11,0.16)';
+  if (val >= 2.0) return 'rgba(249,115,22,0.22)';
+  return 'rgba(244,63,94,0.22)';
+}
+
+function avgOf(ratings: Rating[]): number {
+  const valid = ratings.filter(r => (r.averageRating ?? 0) > 0);
+  if (!valid.length) return 0;
+  return valid.reduce((s, r) => s + (r.averageRating ?? 0), 0) / valid.length;
+}
+
+function formatDate(dateStr: string): string {
+  try {
+    return new Date(dateStr).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
+  } catch { return dateStr; }
+}
+
+function getMonthKey(dateStr: string): string {
+  return dateStr?.slice(0, 7) ?? '';
+}
+
+// ─── Data Transforms ──────────────────────────────────────────────────────────
+
+function buildDateGroups(ratings: Rating[]): DateGroup[] {
+  const byDate = new Map<string, Map<string, Rating[]>>();
   for (const r of ratings) {
-    const meal = r.mealName ?? 'Unknown';
-    const key = `${r.mealDate ?? ''}-${meal}`;
-    if (!map.has(key)) map.set(key, []);
-    map.get(key)!.push(r);
+    const d = r.mealDate ?? '';
+    const m = r.mealName ?? 'Unknown';
+    if (!byDate.has(d)) byDate.set(d, new Map());
+    if (!byDate.get(d)!.has(m)) byDate.get(d)!.set(m, []);
+    byDate.get(d)!.get(m)!.push(r);
   }
-  const dayOrder = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
-  const entries = Array.from(map.entries()).map(([key, items]) => {
-    const date = items[0]?.mealDate ?? '';
-    const day = dateToDayName(date);
-    const meal = items[0]?.mealName ?? 'Unknown';
-    return { key, day, meal, date, items };
-  });
-  return entries.sort((a, b) => {
-    const dateDiff = (b.date ?? '').localeCompare(a.date ?? '');
-    if (dateDiff !== 0) return dateDiff;
-    const mealDiff = MEAL_ORDER.indexOf(a.meal as any) - MEAL_ORDER.indexOf(b.meal as any);
-    if (mealDiff !== 0) return mealDiff;
-    return 0;
-  });
+  return Array.from(byDate.entries())
+    .sort((a, b) => b[0].localeCompare(a[0]))
+    .map(([date, mealMap]) => ({
+      date,
+      day: dateToDayName(date),
+      meals: Array.from(mealMap.entries())
+        .sort(([a], [b]) => MEAL_ORDER.indexOf(a as MealType) - MEAL_ORDER.indexOf(b as MealType))
+        .map(([meal, items]) => ({
+          key: `${date}-${meal}`,
+          date, day: dateToDayName(date),
+          meal: meal as MealType,
+          items,
+          avg: avgOf(items),
+        })),
+    }));
 }
 
-export default function Ratings({ liveRatings }: RatingsProps) {
-  const [selectedRating, setSelectedRating] = useState<Rating | null>(null);
-  const [viewMode, setViewMode] = useState<'grouped' | 'list'>('grouped');
+function buildHeatmapData(ratings: Rating[], weekDates: string[]): Record<string, Record<MealType, { avg: number | null; count: number }>> {
+  const result: Record<string, Record<MealType, { avg: number | null; count: number }>> = {};
+  for (const d of weekDates) {
+    result[d] = { Breakfast: { avg: null, count: 0 }, Lunch: { avg: null, count: 0 }, Dinner: { avg: null, count: 0 } };
+  }
+  for (const r of ratings) {
+    const d = r.mealDate ?? '';
+    const m = r.mealName as MealType;
+    if (!result[d] || !MEALS.includes(m)) continue;
+    const cell = result[d][m];
+    const val = r.averageRating ?? 0;
+    if (val > 0) {
+      cell.avg = cell.avg === null ? val : (cell.avg * cell.count + val) / (cell.count + 1);
+      cell.count++;
+    }
+  }
+  return result;
+}
 
-  const sortedRatings = useMemo(() => sortRatingsByMenu(liveRatings), [liveRatings]);
-  const groupedRatings = useMemo(() => groupRatingsByDayMeal(liveRatings), [liveRatings]);
+function buildItemPerformance(ratings: Rating[]) {
+  const stats: Record<string, { sum: number; count: number; mealCounts: Partial<Record<MealType, number>> }> = {};
+  for (const r of ratings) {
+    if (!r.itemRatings) continue;
+    for (const [item, score] of Object.entries(r.itemRatings)) {
+      const n = Number(score);
+      if (isNaN(n) || n <= 0) continue;
+      if (!stats[item]) stats[item] = { sum: 0, count: 0, mealCounts: {} };
+      stats[item].sum += n;
+      stats[item].count++;
+      const m = r.mealName as MealType;
+      if (m) stats[item].mealCounts[m] = (stats[item].mealCounts[m] ?? 0) + 1;
+    }
+  }
+  return Object.entries(stats)
+    .map(([name, { sum, count, mealCounts }]) => ({
+      name, avg: parseFloat((sum / count).toFixed(1)), count, mealCounts,
+    }))
+    .sort((a, b) => b.avg - a.avg);
+}
 
-  // Calculate Averages based on live data
-  const averages = useMemo(() => {
-    // Filter to only include valid ratings to avoid skewing averages
-    const validRatings = liveRatings.filter(r => (r.averageRating || 0) > 0);
-    
-    if (validRatings.length === 0) return { overall: "--", staff: "--", hygiene: "--" };
-    
-    const total = validRatings.length;
-    const sumOverall = validRatings.reduce((acc, curr) => acc + (curr.averageRating || 0), 0);
-    const sumStaff = validRatings.reduce((acc, curr) => acc + (curr.staffBehaviorRating || 0), 0);
-    const sumHygiene = validRatings.reduce((acc, curr) => acc + (curr.hygieneRating || 0), 0);
+function buildUserStats(ratings: Rating[]) {
+  const map: Record<string, { name: string; email: string; ratings: Rating[] }> = {};
+  for (const r of ratings) {
+    const id = r.userEmail ?? r.userName ?? 'unknown';
+    if (!map[id]) map[id] = { name: r.userName ?? '?', email: r.userEmail ?? '', ratings: [] };
+    map[id].ratings.push(r);
+  }
+  return Object.values(map).map(({ name, email, ratings }) => {
+    const avgs = ratings.map(r => r.averageRating ?? 0).filter(v => v > 0);
+    const avg = avgs.length ? avgs.reduce((a, b) => a + b, 0) / avgs.length : 0;
+    const variance = avgs.length > 1
+      ? avgs.reduce((s, v) => s + (v - avg) ** 2, 0) / avgs.length : 0;
+    const anomaly = variance > 1.5 || avg < 1.5 || avg > 4.9;
+    return { name, email, count: ratings.length, avg: parseFloat(avg.toFixed(1)), variance: parseFloat(variance.toFixed(2)), anomaly };
+  }).sort((a, b) => b.count - a.count);
+}
 
-    return {
-      overall: (sumOverall / total).toFixed(1),
-      staff: (sumStaff / total).toFixed(1),
-      hygiene: (sumHygiene / total).toFixed(1)
-    };
-  }, [liveRatings]);
+// ─── Sub-components ───────────────────────────────────────────────────────────
 
-  // Calculate Average Rating per Item
-  const itemPerformance = useMemo(() => {
-    const stats: Record<string, { sum: number; count: number }> = {};
-    liveRatings.forEach(r => {
-      if (r.itemRatings) {
-        Object.entries(r.itemRatings).forEach(([item, score]) => {
-          // Robustly handle potential string values from database
-          const numScore = Number(score);
-          if (!isNaN(numScore) && numScore > 0) {
-            if (!stats[item]) stats[item] = { sum: 0, count: 0 };
-            stats[item].sum += numScore;
-            stats[item].count += 1;
-          }
-        });
-      }
-    });
-    return Object.entries(stats)
-      .map(([name, { sum, count }]) => ({
-        name,
-        avg: parseFloat((sum / count).toFixed(1)),
-        count
-      }))
-      .sort((a, b) => b.avg - a.avg);
-  }, [liveRatings]);
-
-  // Average rating per meal (Breakfast / Lunch / Dinner)
-  const mealAverages = useMemo(() => {
-    const base: Record<MealType, { sum: number; count: number }> = {
-      Breakfast: { sum: 0, count: 0 },
-      Lunch: { sum: 0, count: 0 },
-      Dinner: { sum: 0, count: 0 }
-    };
-    liveRatings.forEach(r => {
-      const meal = (r.mealName ?? '') as MealType;
-      if (!meal || !(meal in base)) return;
-      const val = typeof r.averageRating === 'number' ? r.averageRating : Number(r.averageRating || 0);
-      if (!isNaN(val) && val > 0) {
-        base[meal].sum += val;
-        base[meal].count += 1;
-      }
-    });
-    const format = (meal: MealType) =>
-      base[meal].count > 0 ? (base[meal].sum / base[meal].count).toFixed(1) : '--';
-    return {
-      Breakfast: format('Breakfast'),
-      Lunch: format('Lunch'),
-      Dinner: format('Dinner')
-    };
-  }, [liveRatings]);
-
+function RatingPill({ value, size = 'sm' }: { value: number | string | undefined | null; size?: 'sm' | 'lg' }) {
+  const num = typeof value === 'number' ? value : parseFloat(String(value ?? '0'));
+  const valid = !isNaN(num) && num > 0;
+  const color = valid ? ratingColor(num) : '#475569';
+  const label = valid ? num.toFixed(1) : '—';
   return (
-    <div className="space-y-8 animate-in fade-in duration-700">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-bold dark:text-white">Feedback Analytics</h1>
-          <p className="text-slate-500 dark:text-slate-400">Analysis of the <code>mealRatings</code> collection, sorted by day & meal.</p>
-        </div>
-        <div className="flex gap-2">
-          <button
-            onClick={() => setViewMode('grouped')}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${viewMode === 'grouped' ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'}`}
-          >
-            By Day & Meal
-          </button>
-          <button
-            onClick={() => setViewMode('list')}
-            className={`px-4 py-2 rounded-xl text-sm font-bold transition-all ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-slate-100 dark:bg-slate-700 text-slate-600 dark:text-slate-400 hover:bg-slate-200 dark:hover:bg-slate-600'}`}
-          >
-            Chronological
-          </button>
-        </div>
+    <span style={{
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      background: valid ? `${color}22` : 'rgba(255,255,255,0.05)',
+      color, border: `1px solid ${color}44`,
+      borderRadius: 6,
+      padding: size === 'lg' ? '6px 12px' : '3px 8px',
+      fontSize: size === 'lg' ? 15 : 12,
+      fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace",
+      fontWeight: 700, whiteSpace: 'nowrap',
+    }}>
+      <Star size={size === 'lg' ? 13 : 10} style={{ fill: color, flexShrink: 0 }} />
+      {label}
+    </span>
+  );
+}
+
+function MiniBar({ value, max = 5, color }: { value: number; max?: number; color: string }) {
+  const pct = Math.min(100, (value / max) * 100);
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flex: 1 }}>
+      <div style={{ flex: 1, height: 5, borderRadius: 3, background: 'rgba(255,255,255,0.07)', overflow: 'hidden' }}>
+        <div style={{ width: `${pct}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.6s ease' }} />
+      </div>
+      <span style={{ fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 11, color, minWidth: 24, textAlign: 'right' }}>{value}</span>
+    </div>
+  );
+}
+
+function StarRow({ value }: { value: number }) {
+  return (
+    <div style={{ display: 'flex', gap: 2 }}>
+      {[1,2,3,4,5].map(i => (
+        <Star key={i} size={11}
+          style={{ fill: i <= Math.round(value) ? '#f59e0b' : 'transparent', stroke: i <= Math.round(value) ? '#f59e0b' : '#334155' }} />
+      ))}
+    </div>
+  );
+}
+
+// ─── Filter Bar ───────────────────────────────────────────────────────────────
+
+interface FilterBarProps {
+  months: string[];
+  selectedMonth: string;
+  setSelectedMonth: (m: string) => void;
+  selectedMeals: MealType[];
+  toggleMeal: (m: MealType) => void;
+  dateRange: { from: string; to: string };
+  setDateRange: (r: { from: string; to: string }) => void;
+  totalCount: number;
+  filteredCount: number;
+}
+
+function FilterBar({ months, selectedMonth, setSelectedMonth, selectedMeals, toggleMeal, dateRange, setDateRange, totalCount, filteredCount }: FilterBarProps) {
+  const s: React.CSSProperties = {
+    display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'center',
+    padding: '14px 20px',
+    background: 'rgba(255,255,255,0.03)',
+    border: '1px solid rgba(255,255,255,0.07)',
+    borderRadius: 14,
+    marginBottom: 24,
+  };
+  const inputStyle: React.CSSProperties = {
+    background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)',
+    borderRadius: 8, padding: '6px 10px', color: '#f1f5f9', fontSize: 12,
+    fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", outline: 'none', cursor: 'pointer',
+  };
+  return (
+    <div style={s}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#64748b' }}>
+        <Filter size={14} />
+        <span style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>Filters</span>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border dark:border-slate-700 shadow-sm">
-           <div className="p-2 w-fit bg-yellow-50 text-yellow-600 dark:bg-yellow-900/30 dark:text-yellow-400 rounded-lg"><Star size={20} /></div>
-           <p className="mt-4 text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-widest">Overall Rating</p>
-           <p className="text-3xl font-black mt-1 dark:text-white">{averages.overall} <span className="text-sm font-normal text-slate-400">/ 5.0</span></p>
-        </div>
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border dark:border-slate-700 shadow-sm">
-           <div className="p-2 w-fit bg-blue-50 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 rounded-lg"><Pizza size={20} /></div>
-           <p className="mt-4 text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-widest">Total Feedbacks</p>
-           <p className="text-3xl font-black mt-1 dark:text-white">{liveRatings.length}</p>
-        </div>
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border dark:border-slate-700 shadow-sm">
-           <div className="p-2 w-fit bg-green-50 text-green-600 dark:bg-green-900/30 dark:text-green-400 rounded-lg"><Heart size={20} /></div>
-           <p className="mt-4 text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-widest">Staff Score</p>
-           <p className="text-3xl font-black mt-1 dark:text-white">{averages.staff}</p>
-        </div>
-        <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border dark:border-slate-700 shadow-sm">
-           <div className="p-2 w-fit bg-purple-50 text-purple-600 dark:bg-purple-900/30 dark:text-purple-400 rounded-lg"><ShieldCheck size={20} /></div>
-           <p className="mt-4 text-slate-500 dark:text-slate-400 text-xs font-black uppercase tracking-widest">Hygiene Score</p>
-           <p className="text-3xl font-black mt-1 dark:text-white">{averages.hygiene}</p>
-        </div>
+      {/* Month */}
+      <select value={selectedMonth} onChange={e => setSelectedMonth(e.target.value)} style={inputStyle}>
+        <option value="">All Months</option>
+        {months.map(m => <option key={m} value={m}>{new Date(m + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })}</option>)}
+      </select>
+
+      {/* Meal type pills */}
+      <div style={{ display: 'flex', gap: 6 }}>
+        {MEALS.map(meal => {
+          const active = selectedMeals.includes(meal);
+          const mc = MEAL_COLORS[meal];
+          return (
+            <button key={meal} onClick={() => toggleMeal(meal)} style={{
+              display: 'inline-flex', alignItems: 'center', gap: 5, padding: '5px 10px',
+              borderRadius: 20, border: `1px solid ${active ? mc.border : 'rgba(255,255,255,0.08)'}`,
+              background: active ? mc.bg : 'transparent',
+              color: active ? mc.text : '#64748b', fontSize: 12, fontWeight: 600, cursor: 'pointer',
+              transition: 'all 0.2s', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
+            }}>
+              {MEAL_ICONS[meal]} {meal}
+            </button>
+          );
+        })}
       </div>
 
-      {/* Meal-wise averages */}
-      <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border dark:border-slate-700 shadow-sm">
-        <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Average Rating by Meal</p>
-        <div className="flex flex-wrap gap-6 text-sm">
-          {(['Breakfast', 'Lunch', 'Dinner'] as MealType[]).map(meal => (
-            <div key={meal} className="flex flex-col">
-              <span className="text-xs font-black uppercase tracking-widest text-slate-500">{meal}</span>
-              <span className="text-2xl font-bold dark:text-white">
-                {mealAverages[meal]} <span className="text-xs text-slate-400">/ 5.0</span>
-              </span>
-            </div>
-          ))}
-        </div>
+      {/* Date range */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <input type="date" value={dateRange.from}
+          onChange={e => setDateRange({ ...dateRange, from: e.target.value })} style={inputStyle} />
+        <span style={{ color: '#475569', fontSize: 12 }}>–</span>
+        <input type="date" value={dateRange.to}
+          onChange={e => setDateRange({ ...dateRange, to: e.target.value })} style={inputStyle} />
       </div>
 
-      {/* Menu Item Performance Section */}
-      <div className="bg-white dark:bg-slate-800 p-8 rounded-3xl border dark:border-slate-700 shadow-sm">
-        <div className="flex items-center gap-3 mb-6">
-            <div className="p-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 rounded-lg">
-                <BarChart3 size={24} />
-            </div>
-            <div>
-                <h2 className="text-lg font-bold dark:text-white">Menu Item Performance</h2>
-                <p className="text-xs text-slate-500 dark:text-slate-400 font-medium">Average ratings per food item across all feedbacks</p>
-            </div>
-        </div>
-        
-        {itemPerformance.length > 0 ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {itemPerformance.map((item) => (
-                    <div key={item.name} className="flex items-center justify-between p-4 rounded-xl bg-slate-50 dark:bg-slate-700/30 border dark:border-slate-700 hover:border-blue-200 dark:hover:border-blue-800 transition-colors">
-                        <span className="font-bold text-slate-700 dark:text-slate-200">{item.name}</span>
-                        <div className="flex items-center gap-3">
-                            <span className="text-[10px] text-slate-400 font-black uppercase tracking-widest">{item.count} reviews</span>
-                            <div className={`px-2 py-1 rounded-lg text-xs font-black ${
-                                item.avg >= 4 ? 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400' :
-                                item.avg >= 3 ? 'bg-yellow-100 text-yellow-700 dark:bg-yellow-900/30 dark:text-yellow-400' :
-                                'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400'
-                            }`}>
-                                {item.avg} ★
-                            </div>
-                        </div>
-                    </div>
-                ))}
-            </div>
+      <div style={{ marginLeft: 'auto', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 11, color: '#475569' }}>
+        {filteredCount !== totalCount ? (
+          <span><span style={{ color: '#f1f5f9', fontWeight: 700 }}>{filteredCount}</span> / {totalCount} ratings</span>
         ) : (
-            <div className="text-center py-8 text-slate-400">No item ratings available yet.</div>
+          <span style={{ color: '#f1f5f9', fontWeight: 700 }}>{totalCount} total ratings</span>
         )}
       </div>
+    </div>
+  );
+}
 
-      <div className="bg-white dark:bg-slate-800 rounded-3xl border dark:border-slate-700 shadow-sm overflow-hidden">
-        <div className="p-6 border-b dark:border-slate-700 flex items-center justify-between">
-           <h3 className="text-lg font-bold dark:text-white">Feedback by Day & Meal</h3>
-           <div className="flex items-center gap-2 text-xs text-slate-500 uppercase tracking-widest font-black">
-              <Database size={14} /> Live Sync
-           </div>
+// ─── KPI Cards ────────────────────────────────────────────────────────────────
+
+function KpiCard({ icon, label, value, sub, accent }: { icon: React.ReactNode; label: string; value: string | number; sub?: string; accent: string }) {
+  return (
+    <div style={{
+      background: 'rgba(255,255,255,0.03)', border: `1px solid rgba(255,255,255,0.07)`,
+      borderRadius: 16, padding: '20px 24px', position: 'relative', overflow: 'hidden',
+    }}>
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${accent}, transparent)` }} />
+      <div style={{ display: 'inline-flex', padding: '8px', background: `${accent}18`, borderRadius: 10, color: accent, marginBottom: 14 }}>
+        {icon}
+      </div>
+      <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#64748b', marginBottom: 6, fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>{label}</p>
+      <p style={{ fontSize: 28, fontWeight: 800, color: '#f8fafc', lineHeight: 1, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+        {value}
+        {sub && <span style={{ fontSize: 13, fontWeight: 400, color: '#64748b', marginLeft: 4 }}>{sub}</span>}
+      </p>
+    </div>
+  );
+}
+
+// ─── Weekly Heatmap ───────────────────────────────────────────────────────────
+
+function WeeklyHeatmap({ ratings }: { ratings: Rating[] }) {
+  const weekDates = useMemo(() => {
+    const dates = [...new Set(ratings.map(r => r.mealDate ?? '').filter(Boolean))].sort();
+    return dates.slice(-7);
+  }, [ratings]);
+
+  const heatmap = useMemo(() => buildHeatmapData(ratings, weekDates), [ratings, weekDates]);
+
+  if (!weekDates.length) return null;
+
+  return (
+    <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, padding: 24, marginBottom: 28 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
+        <div style={{ display: 'inline-flex', padding: 8, background: 'rgba(99,102,241,0.15)', borderRadius: 10, color: '#818cf8' }}>
+          <BarChart3 size={18} />
         </div>
-        <div className="p-6">
-           {liveRatings.length > 0 ? (
-             viewMode === 'grouped' ? (
-               <div className="space-y-8">
-                 {groupedRatings.map(({ key, day, meal, date, items }) => (
-                   <div key={key} className="border dark:border-slate-600 rounded-2xl overflow-hidden">
-                     <div className="px-6 py-3 bg-slate-50 dark:bg-slate-700/50 border-b dark:border-slate-600 flex items-center justify-between">
-                       <span className="font-bold dark:text-slate-200">{day} • {meal} <span className="font-normal text-slate-500 text-sm">({date})</span></span>
-                       <span className="text-xs text-slate-500">{items.length} rating{items.length !== 1 ? 's' : ''}</span>
-                     </div>
-                     <div className="p-4 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                       {items.map(rating => (
-                         <div 
-                           key={rating.id} 
-                           onClick={() => setSelectedRating(rating)}
-                           className="p-4 bg-slate-50 dark:bg-slate-700/50 rounded-2xl border dark:border-slate-600 transition-all hover:border-blue-500 cursor-pointer group hover:shadow-md"
-                         >
-                           <div className="flex justify-between items-start mb-3">
-                             <div>
-                               <p className="text-sm font-bold dark:text-slate-200">{rating.userName}</p>
-                               <p className="text-[10px] text-slate-400">{rating.mealDate}</p>
-                             </div>
-                             <div className="flex items-center gap-1 bg-yellow-50 dark:bg-yellow-900/20 px-2 py-1 rounded text-yellow-600 dark:text-yellow-400 text-xs font-black">
-                               {typeof rating.averageRating === 'number' ? rating.averageRating.toFixed(1) : '?.?'} <Star size={12} className="fill-current" />
-                             </div>
-                           </div>
-                           <div className="flex justify-between text-[10px] uppercase font-bold text-slate-500">
-                             <span>Staff {rating.staffBehaviorRating}/5</span>
-                             <span>Hygiene {rating.hygieneRating}/5</span>
-                           </div>
-                         </div>
-                       ))}
-                     </div>
-                   </div>
-                 ))}
-               </div>
-             ) : (
-             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                {sortedRatings.map(rating => (
-                  <div 
-                    key={rating.id} 
-                    onClick={() => setSelectedRating(rating)}
-                    className="p-4 bg-slate-50 dark:bg-slate-700/50 rounded-2xl border dark:border-slate-600 transition-all hover:border-blue-500 cursor-pointer group hover:shadow-md relative overflow-hidden"
-                  >
-                    <div className="flex justify-between items-start mb-3">
-                       <div>
-                          <p className="text-sm font-bold dark:text-slate-200">{rating.userName}</p>
-                          <p className="text-[10px] text-slate-400 uppercase font-bold tracking-tighter">{rating.mealName} • {rating.mealDate}</p>
-                       </div>
-                       <div className="flex items-center gap-1 bg-yellow-50 dark:bg-yellow-900/20 px-2 py-1 rounded text-yellow-600 dark:text-yellow-400 text-xs font-black">
-                          {typeof rating.averageRating === 'number' ? rating.averageRating.toFixed(1) : '?.?'} <Star size={12} className="fill-current" />
-                       </div>
+        <div>
+          <h3 style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", fontSize: 15, fontWeight: 700, color: '#f1f5f9', margin: 0 }}>Weekly Rating Heatmap</h3>
+          <p style={{ fontSize: 11, color: '#64748b', margin: 0 }}>Last 7 service days · Avg rating per slot</p>
+        </div>
+        {/* Legend */}
+        <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 6 }}>
+          {['Poor', 'Avg', 'Good', 'Great'].map((l, i) => {
+            const colors = ['rgba(244,63,94,0.35)', 'rgba(245,158,11,0.35)', 'rgba(16,185,129,0.25)', 'rgba(16,185,129,0.45)'];
+            return (
+              <div key={l} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+                <div style={{ width: 10, height: 10, borderRadius: 2, background: colors[i] }} />
+                <span style={{ fontSize: 10, color: '#64748b', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>{l}</span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ borderCollapse: 'collapse', width: '100%', tableLayout: 'fixed', minWidth: 420 }}>
+          <thead>
+            <tr>
+              <th style={{ width: 90, padding: '0 0 10px', textAlign: 'left', fontSize: 10, color: '#475569', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.06em' }}>Meal</th>
+              {weekDates.map(d => (
+                <th key={d} style={{ padding: '0 4px 10px', textAlign: 'center', fontSize: 10, color: '#94a3b8', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontWeight: 500 }}>
+                  <div>{dateToDayName(d).slice(0, 3).toUpperCase()}</div>
+                  <div style={{ color: '#475569', marginTop: 2 }}>{new Date(d).getDate()}</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {MEALS.map(meal => (
+              <tr key={meal}>
+                <td style={{ paddingBottom: 6, paddingRight: 12 }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '4px 10px', borderRadius: 6, background: MEAL_COLORS[meal].bg, color: MEAL_COLORS[meal].text, fontSize: 11, fontWeight: 600, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+                    {MEAL_ICONS[meal]} {meal}
+                  </div>
+                </td>
+                {weekDates.map(d => {
+                  const cell = heatmap[d]?.[meal];
+                  const avg = cell?.avg ?? null;
+                  const count = cell?.count ?? 0;
+                  return (
+                    <td key={d} style={{ padding: '0 4px 6px', textAlign: 'center' }}>
+                      <div title={avg !== null ? `${avg.toFixed(1)} ★ (${count} ratings)` : 'No data'}
+                        style={{
+                          borderRadius: 8, padding: '8px 4px',
+                          background: heatmapBg(avg),
+                          border: `1px solid ${avg !== null ? `${ratingColor(avg)}30` : 'rgba(255,255,255,0.04)'}`,
+                          transition: 'all 0.2s', minHeight: 46, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 2,
+                        }}>
+                        {avg !== null ? (
+                          <>
+                            <span style={{ fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 13, fontWeight: 700, color: ratingColor(avg) }}>{avg.toFixed(1)}</span>
+                            <span style={{ fontSize: 9, color: '#64748b' }}>{count}r</span>
+                          </>
+                        ) : (
+                          <Minus size={12} color="#1e293b" />
+                        )}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ─── Timeline View ────────────────────────────────────────────────────────────
+
+function TimelineView({ dateGroups, onSelect }: { dateGroups: DateGroup[]; onSelect: (r: Rating) => void }) {
+  const [expandedDates, setExpandedDates] = useState<Set<string>>(new Set([dateGroups[0]?.date ?? '']));
+  const [expandedMeals, setExpandedMeals] = useState<Set<string>>(new Set());
+
+  const toggleDate = useCallback((date: string) => {
+    setExpandedDates(prev => {
+      const n = new Set(prev);
+      n.has(date) ? n.delete(date) : n.add(date);
+      return n;
+    });
+  }, []);
+
+  const toggleMeal = useCallback((key: string) => {
+    setExpandedMeals(prev => {
+      const n = new Set(prev);
+      n.has(key) ? n.delete(key) : n.add(key);
+      return n;
+    });
+  }, []);
+
+  if (!dateGroups.length) {
+    return (
+      <div style={{ textAlign: 'center', padding: '60px 0', color: '#475569' }}>
+        <Clock size={40} style={{ margin: '0 auto 16px', opacity: 0.2 }} />
+        <p style={{ fontSize: 14 }}>No ratings match the current filters.</p>
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {dateGroups.map(({ date, day, meals }) => {
+        const dateOpen = expandedDates.has(date);
+        const allRatings = meals.flatMap(m => m.items);
+        const dateAvg = avgOf(allRatings);
+
+        return (
+          <div key={date} style={{ border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, overflow: 'hidden', background: 'rgba(255,255,255,0.015)' }}>
+            {/* Date header */}
+            <button onClick={() => toggleDate(date)} style={{
+              width: '100%', display: 'flex', alignItems: 'center', gap: 14,
+              padding: '14px 20px', background: 'none', border: 'none', cursor: 'pointer',
+              textAlign: 'left',
+            }}>
+              <Calendar size={15} color="#64748b" style={{ flexShrink: 0 }} />
+              <div style={{ flex: 1 }}>
+                <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", fontSize: 14, fontWeight: 700, color: '#f1f5f9' }}>
+                  {day}
+                </span>
+                <span style={{ fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 11, color: '#64748b', marginLeft: 10 }}>
+                  {formatDate(date)}
+                </span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 6 }}>
+                <span style={{ fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 11, color: '#64748b' }}>{allRatings.length} ratings</span>
+                {dateAvg > 0 && <RatingPill value={dateAvg} />}
+                <div style={{ display: 'flex', gap: 6 }}>
+                  {meals.map(m => (
+                    <div key={m.meal} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 12, background: MEAL_COLORS[m.meal].bg, color: MEAL_COLORS[m.meal].text, fontSize: 10, fontWeight: 600, border: `1px solid ${MEAL_COLORS[m.meal].border}` }}>
+                      {MEAL_ICONS[m.meal]} {m.avg > 0 ? m.avg.toFixed(1) : '—'}
                     </div>
-                    <div className="space-y-2 mt-4">
-                       <div className="flex justify-between text-[10px] uppercase font-bold text-slate-500">
-                          <span>Staff</span>
-                          <span>{rating.staffBehaviorRating}/5</span>
-                       </div>
-                       <div className="flex justify-between text-[10px] uppercase font-bold text-slate-500">
-                          <span>Hygiene</span>
-                          <span>{rating.hygieneRating}/5</span>
-                       </div>
+                  ))}
+                </div>
+              </div>
+              <ChevronDown size={16} color="#64748b" style={{ transition: 'transform 0.2s', transform: dateOpen ? 'rotate(180deg)' : 'rotate(0deg)', flexShrink: 0 }} />
+            </button>
+
+            {dateOpen && (
+              <div style={{ padding: '0 16px 16px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+                {meals.map(group => {
+                  const mealOpen = expandedMeals.has(group.key);
+                  const mc = MEAL_COLORS[group.meal];
+                  return (
+                    <div key={group.key} style={{ border: `1px solid ${mc.border}`, borderRadius: 10, overflow: 'hidden', background: `${mc.bg}` }}>
+                      <button onClick={() => toggleMeal(group.key)} style={{
+                        width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+                        padding: '10px 16px', background: 'none', border: 'none', cursor: 'pointer', textAlign: 'left',
+                      }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, color: mc.text, fontSize: 12, fontWeight: 700, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+                          {MEAL_ICONS[group.meal]} {group.meal}
+                        </span>
+                        <span style={{ fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 11, color: '#64748b' }}>{group.items.length} resp.</span>
+                        {group.avg > 0 && <RatingPill value={group.avg} />}
+                        <ChevronDown size={14} color="#64748b" style={{ marginLeft: 'auto', transition: 'transform 0.2s', transform: mealOpen ? 'rotate(180deg)' : 'rotate(0deg)' }} />
+                      </button>
+
+                      {mealOpen && (
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 10, padding: '8px 12px 14px' }}>
+                          {group.items.map(rating => (
+                            <div key={rating.id} onClick={() => onSelect(rating)}
+                              style={{
+                                background: 'rgba(0,0,0,0.25)', borderRadius: 10, padding: '12px 14px',
+                                border: '1px solid rgba(255,255,255,0.06)', cursor: 'pointer',
+                                transition: 'border-color 0.2s, transform 0.15s',
+                              }}
+                              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = mc.border; (e.currentTarget as HTMLElement).style.transform = 'translateY(-1px)'; }}
+                              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = 'rgba(255,255,255,0.06)'; (e.currentTarget as HTMLElement).style.transform = 'none'; }}
+                            >
+                              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                                  <div style={{ width: 28, height: 28, borderRadius: '50%', background: `${mc.bg}`, border: `1px solid ${mc.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', color: mc.text, fontSize: 12, fontWeight: 700, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", flexShrink: 0 }}>
+                                    {rating.userName?.charAt(0)?.toUpperCase() ?? '?'}
+                                  </div>
+                                  <p style={{ fontSize: 12, fontWeight: 600, color: '#e2e8f0', margin: 0 }}>{rating.userName}</p>
+                                </div>
+                                <RatingPill value={rating.averageRating} />
+                              </div>
+                              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: 10, color: '#64748b', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>Staff {rating.staffBehaviorRating}/5</span>
+                                <span style={{ fontSize: 10, color: '#64748b', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>Hygiene {rating.hygieneRating}/5</span>
+                                <ChevronRight size={11} color="#475569" />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                     </div>
-                    
-                    {/* Hover Effect */}
-                    <div className="mt-3 pt-3 border-t dark:border-slate-600 flex justify-center text-blue-500 text-xs font-bold items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity absolute bottom-2 left-0 right-0 bg-slate-50 dark:bg-slate-800 mx-4">
-                        View Details <ChevronRight size={14} />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ─── Meal Performance View ────────────────────────────────────────────────────
+
+function MealPerformanceView({ ratings }: { ratings: Rating[] }) {
+  const itemPerf = useMemo(() => buildItemPerformance(ratings), [ratings]);
+
+  const mealStats = useMemo(() => {
+    return MEALS.map(meal => {
+      const mealRatings = ratings.filter(r => r.mealName === meal && (r.averageRating ?? 0) > 0);
+      const avg = mealRatings.length ? mealRatings.reduce((s, r) => s + (r.averageRating ?? 0), 0) / mealRatings.length : 0;
+      const staffAvg = mealRatings.length ? mealRatings.reduce((s, r) => s + (r.staffBehaviorRating ?? 0), 0) / mealRatings.length : 0;
+      const hygieneAvg = mealRatings.length ? mealRatings.reduce((s, r) => s + (r.hygieneRating ?? 0), 0) / mealRatings.length : 0;
+      return { meal, avg, staffAvg, hygieneAvg, count: mealRatings.length };
+    });
+  }, [ratings]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {/* Meal stat cards — one per meal, all metrics grouped inside */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 14 }}>
+        {mealStats.map(({ meal, avg, staffAvg, hygieneAvg, count }) => {
+          const mc = MEAL_COLORS[meal];
+          const score = ratingColor(avg);
+          return (
+            <div key={meal} style={{
+              background: 'rgba(255,255,255,0.02)', border: `1px solid ${mc.border}`,
+              borderRadius: 16, padding: '20px 22px', position: 'relative', overflow: 'hidden',
+            }}>
+              {/* Top accent strip */}
+              <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 3, background: `linear-gradient(90deg, ${mc.text}, transparent)` }} />
+
+              {/* Meal label */}
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 18 }}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7, padding: '4px 10px', borderRadius: 20, background: mc.bg, color: mc.text, fontSize: 12, fontWeight: 700 }}>
+                  {MEAL_ICONS[meal]} {meal}
+                </div>
+                <span style={{ fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 10, color: '#475569' }}>{count} resp.</span>
+              </div>
+
+              {/* Big overall score */}
+              <div style={{ marginBottom: 18 }}>
+                <p style={{ fontSize: 11, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.09em', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", margin: '0 0 6px' }}>Overall</p>
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                  <span style={{ fontSize: 34, fontWeight: 800, color: avg > 0 ? score : '#334155', lineHeight: 1, fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>
+                    {avg > 0 ? avg.toFixed(1) : '—'}
+                  </span>
+                  {avg > 0 && <span style={{ fontSize: 12, color: '#475569' }}>/5</span>}
+                </div>
+                {avg > 0 && (
+                  <div style={{ marginTop: 8, height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                    <div style={{ width: `${(avg / 5) * 100}%`, height: '100%', background: score, borderRadius: 2, transition: 'width 0.6s ease' }} />
+                  </div>
+                )}
+              </div>
+
+              {/* Staff + Hygiene sub-metrics */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 10, borderTop: '1px solid rgba(255,255,255,0.06)', paddingTop: 14 }}>
+                {([
+                  { label: 'Staff',   value: staffAvg,   color: '#60a5fa' },
+                  { label: 'Hygiene', value: hygieneAvg, color: '#a78bfa' },
+                ] as const).map(({ label, value, color }) => (
+                  <div key={label}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5 }}>
+                      <span style={{ fontSize: 11, color: '#64748b', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>{label}</span>
+                      <span style={{ fontSize: 11, fontWeight: 700, color: avg > 0 ? color : '#334155', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>
+                        {avg > 0 ? value.toFixed(1) : '—'}
+                      </span>
+                    </div>
+                    <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 2, overflow: 'hidden' }}>
+                      <div style={{ width: avg > 0 ? `${(value / 5) * 100}%` : '0%', height: '100%', background: color, borderRadius: 2, opacity: 0.8, transition: 'width 0.6s ease' }} />
                     </div>
                   </div>
                 ))}
-             </div>
-             )
-           ) : (
-             <div className="py-20 text-center text-slate-400 flex flex-col items-center justify-center">
-                <Clock size={48} className="opacity-10 mb-4" />
-                <p className="font-medium">No ratings found in <code>mealRatings</code> collection.</p>
-             </div>
-           )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Item performance table */}
+      <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, padding: 24 }}>
+        <h3 style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", fontSize: 14, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 20 }}>Menu Item Rankings</h3>
+        {itemPerf.length === 0 ? (
+          <p style={{ color: '#475569', fontSize: 13, textAlign: 'center', padding: '32px 0' }}>No item rating data available.</p>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: 10 }}>
+            {itemPerf.map((item, idx) => (
+              <div key={item.name} style={{
+                display: 'flex', alignItems: 'center', gap: 12, padding: '12px 16px',
+                background: 'rgba(255,255,255,0.03)', borderRadius: 10, border: '1px solid rgba(255,255,255,0.06)',
+              }}>
+                <span style={{ fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 11, color: '#334155', fontWeight: 700, minWidth: 20, textAlign: 'center' }}>#{idx + 1}</span>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', margin: '0 0 4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <StarRow value={item.avg} />
+                    <span style={{ fontSize: 10, color: '#64748b', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>{item.count} reviews</span>
+                  </div>
+                </div>
+                <RatingPill value={item.avg} />
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ─── User Analytics View ──────────────────────────────────────────────────────
+
+function UserAnalyticsView({ ratings }: { ratings: Rating[] }) {
+  const userStats = useMemo(() => buildUserStats(ratings), [ratings]);
+  const anomalies = userStats.filter(u => u.anomaly);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+      {anomalies.length > 0 && (
+        <div style={{ background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.25)', borderRadius: 14, padding: '16px 20px', display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+          <AlertTriangle size={18} color="#f59e0b" style={{ flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <p style={{ fontWeight: 700, color: '#fbbf24', fontSize: 13, margin: '0 0 4px', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+              {anomalies.length} anomalous rating pattern{anomalies.length > 1 ? 's' : ''} detected
+            </p>
+            <p style={{ fontSize: 12, color: '#92400e', margin: 0 }}>
+              Users with extreme averages (&lt;1.5 or &gt;4.9) or high rating variance may indicate outliers or bias.
+              Review: <strong style={{ color: '#fbbf24' }}>{anomalies.map(u => u.name).join(', ')}</strong>
+            </p>
+          </div>
         </div>
+      )}
+
+      <div style={{ background: 'rgba(255,255,255,0.02)', border: '1px solid rgba(255,255,255,0.07)', borderRadius: 16, overflow: 'hidden' }}>
+        <div style={{ padding: '16px 20px', borderBottom: '1px solid rgba(255,255,255,0.07)', display: 'flex', alignItems: 'center', gap: 10 }}>
+          <Users size={16} color="#64748b" />
+          <span style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", fontSize: 14, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.08em' }}>User Feedback Summary</span>
+        </div>
+        <div style={{ overflowX: 'auto' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                {['User', 'Ratings', 'Avg Rating', 'Staff', 'Hygiene', 'Variance', 'Flag'].map(col => (
+                  <th key={col} style={{ padding: '10px 16px', textAlign: 'left', fontSize: 10, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontWeight: 600 }}>{col}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {userStats.map((u, i) => {
+                const userRatings = ratings.filter(r => (r.userEmail ?? r.userName) === (u.email ?? u.name));
+                const staffAvg = userRatings.length ? userRatings.reduce((s, r) => s + (r.staffBehaviorRating ?? 0), 0) / userRatings.length : 0;
+                const hygAvg = userRatings.length ? userRatings.reduce((s, r) => s + (r.hygieneRating ?? 0), 0) / userRatings.length : 0;
+                return (
+                  <tr key={i} style={{ borderBottom: '1px solid rgba(255,255,255,0.04)', background: u.anomaly ? 'rgba(245,158,11,0.04)' : 'transparent' }}>
+                    <td style={{ padding: '12px 16px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                        <div style={{ width: 30, height: 30, borderRadius: '50%', background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#818cf8', fontSize: 12, fontWeight: 700, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", flexShrink: 0 }}>
+                          {u.name.charAt(0).toUpperCase()}
+                        </div>
+                        <div>
+                          <p style={{ fontSize: 13, fontWeight: 600, color: '#e2e8f0', margin: 0 }}>{u.name}</p>
+                          {u.email && <p style={{ fontSize: 10, color: '#475569', margin: 0, fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>{u.email}</p>}
+                        </div>
+                      </div>
+                    </td>
+                    <td style={{ padding: '12px 16px', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 13, color: '#94a3b8', fontWeight: 700 }}>{u.count}</td>
+                    <td style={{ padding: '12px 16px' }}>{u.avg > 0 ? <RatingPill value={u.avg} /> : <span style={{ color: '#475569', fontSize: 12 }}>—</span>}</td>
+                    <td style={{ padding: '12px 16px', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 12, color: '#64748b' }}>{staffAvg > 0 ? staffAvg.toFixed(1) : '—'}</td>
+                    <td style={{ padding: '12px 16px', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 12, color: '#64748b' }}>{hygAvg > 0 ? hygAvg.toFixed(1) : '—'}</td>
+                    <td style={{ padding: '12px 16px', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 12, color: u.variance > 1.5 ? '#f59e0b' : '#475569' }}>{u.variance}</td>
+                    <td style={{ padding: '12px 16px' }}>
+                      {u.anomaly ? (
+                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, padding: '2px 8px', borderRadius: 12, background: 'rgba(245,158,11,0.12)', color: '#f59e0b', fontSize: 10, fontWeight: 700, border: '1px solid rgba(245,158,11,0.25)', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>
+                          <AlertTriangle size={9} /> ANOMALY
+                        </span>
+                      ) : (
+                        <span style={{ fontSize: 10, color: '#1e293b', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>—</span>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Detail Modal ─────────────────────────────────────────────────────────────
+
+function RatingDetailModal({ rating, onClose }: { rating: Rating; onClose: () => void }) {
+  const mc = MEAL_COLORS[(rating.mealName as MealType) ?? 'Breakfast'] ?? MEAL_COLORS.Breakfast;
+  return (
+    <div onClick={onClose} style={{
+      position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: 16, background: 'rgba(2,6,23,0.85)', backdropFilter: 'blur(8px)', animation: 'fadeIn 0.15s ease',
+    }}>
+      <div onClick={e => e.stopPropagation()} style={{
+        background: '#0f172a', borderRadius: 20, width: '100%', maxWidth: 500,
+        border: '1px solid rgba(255,255,255,0.1)', boxShadow: '0 25px 60px rgba(0,0,0,0.6)',
+        overflow: 'hidden', maxHeight: '90vh', display: 'flex', flexDirection: 'column',
+      }}>
+        {/* Header */}
+        <div style={{ padding: '20px 24px', borderBottom: '1px solid rgba(255,255,255,0.07)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)' }}>
+          <div>
+            <h3 style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", fontSize: 17, fontWeight: 800, color: '#f1f5f9', margin: '0 0 3px' }}>Feedback Details</h3>
+            <p style={{ fontSize: 11, color: '#64748b', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", margin: 0 }}>
+              {new Date(rating.timestamp).toLocaleString('en-IN')}
+            </p>
+          </div>
+          <button onClick={onClose} style={{ background: 'rgba(255,255,255,0.06)', border: '1px solid rgba(255,255,255,0.1)', borderRadius: 8, padding: '6px 8px', cursor: 'pointer', color: '#94a3b8', display: 'flex', lineHeight: 1 }}>
+            <X size={16} />
+          </button>
+        </div>
+
+        <div style={{ padding: '24px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 22 }}>
+          {/* User info */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+            <div style={{ width: 46, height: 46, borderRadius: '50%', background: mc.bg, border: `1px solid ${mc.border}`, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 18, fontWeight: 800, color: mc.text, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", flexShrink: 0 }}>
+              {rating.userName?.charAt(0)?.toUpperCase() ?? '?'}
+            </div>
+            <div style={{ flex: 1 }}>
+              <p style={{ fontWeight: 700, fontSize: 15, color: '#f1f5f9', margin: '0 0 2px', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>{rating.userName}</p>
+              {rating.userEmail && <p style={{ fontSize: 11, color: '#64748b', margin: 0, fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>{rating.userEmail}</p>}
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <p style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", marginBottom: 4 }}>Meal</p>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', borderRadius: 8, background: mc.bg, border: `1px solid ${mc.border}`, color: mc.text, fontSize: 12, fontWeight: 700, fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>
+                {MEAL_ICONS[rating.mealName as MealType ?? 'Breakfast']} {rating.mealName}
+              </div>
+            </div>
+          </div>
+
+          {/* Overall score */}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: 'rgba(245,158,11,0.08)', border: '1px solid rgba(245,158,11,0.2)', borderRadius: 12, padding: '14px 18px' }}>
+            <div>
+              <p style={{ fontSize: 11, color: '#92400e', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", marginBottom: 2 }}>Overall Experience</p>
+              <StarRow value={rating.averageRating ?? 0} />
+            </div>
+            <div style={{ textAlign: 'right' }}>
+              <RatingPill value={rating.averageRating} size="lg" />
+              {rating.averageRating != null && <p style={{ fontSize: 10, color: '#92400e', marginTop: 4, fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>{ratingLabel(rating.averageRating ?? 0)}</p>}
+            </div>
+          </div>
+
+          {/* Item ratings */}
+          {rating.itemRatings && Object.keys(rating.itemRatings).length > 0 && (
+            <div>
+              <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#64748b', marginBottom: 12, fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", display: 'flex', alignItems: 'center', gap: 6 }}>
+                <Pizza size={12} /> Item Breakdown
+              </p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {Object.entries(rating.itemRatings).map(([item, score]) => {
+                  const n = Number(score);
+                  const color = ratingColor(n);
+                  return (
+                    <div key={item} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <span style={{ width: 130, fontSize: 13, color: '#cbd5e1', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif" }}>{item}</span>
+                      <div style={{ flex: 1, height: 6, background: 'rgba(255,255,255,0.05)', borderRadius: 3, overflow: 'hidden' }}>
+                        <div style={{ width: `${(n / 5) * 100}%`, height: '100%', background: color, borderRadius: 3, transition: 'width 0.5s ease' }} />
+                      </div>
+                      <span style={{ fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 12, color, fontWeight: 700, minWidth: 20, textAlign: 'right' }}>{score}</span>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Staff + Hygiene */}
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            {([
+              { label: 'Staff Behavior', value: rating.staffBehaviorRating, icon: <Heart size={14} />, color: '#60a5fa' },
+              { label: 'Hygiene', value: rating.hygieneRating, icon: <ShieldCheck size={14} />, color: '#a78bfa' },
+            ] as const).map(({ label, value, icon, color }) => (
+              <div key={label} style={{ background: `${color}0d`, border: `1px solid ${color}25`, borderRadius: 10, padding: '14px 16px', textAlign: 'center' }}>
+                <div style={{ color, marginBottom: 8, display: 'flex', justifyContent: 'center' }}>{icon}</div>
+                <p style={{ fontSize: 10, color: '#64748b', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 4, fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>{label}</p>
+                <p style={{ fontSize: 24, fontWeight: 800, color, fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", margin: 0 }}>
+                  {value}<span style={{ fontSize: 12, color: '#475569' }}>/5</span>
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ─── Main Component ───────────────────────────────────────────────────────────
+
+export default function Ratings({ liveRatings }: RatingsProps) {
+  const [activeTab, setActiveTab] = useState<TabId>('timeline');
+  const [selectedRatingId, setSelectedRatingId] = useState<string | null>(null);
+  const selectedRating = useMemo(
+    () => liveRatings.find(r => r.id === selectedRatingId) ?? null,
+    [selectedRatingId, liveRatings]
+  );
+  const [selectedMonth, setSelectedMonth] = useState<string>('');
+  const [selectedMeals, setSelectedMeals] = useState<MealType[]>([...MEALS]);
+  const [dateRange, setDateRange] = useState<{ from: string; to: string }>({ from: '', to: '' });
+
+  const toggleMeal = useCallback((m: MealType) => {
+    setSelectedMeals(prev => prev.includes(m) ? prev.filter(x => x !== m) : [...prev, m]);
+  }, []);
+
+  const availableMonths = useMemo(() => {
+    const months = [...new Set(liveRatings.map(r => getMonthKey(r.mealDate ?? '')).filter(Boolean))].sort().reverse();
+    return months;
+  }, [liveRatings]);
+
+  const filteredRatings = useMemo(() => {
+    return liveRatings.filter(r => {
+      if (selectedMonth && !r.mealDate?.startsWith(selectedMonth)) return false;
+      if (!selectedMeals.includes(r.mealName as MealType)) return false;
+      if (dateRange.from && (r.mealDate ?? '') < dateRange.from) return false;
+      if (dateRange.to && (r.mealDate ?? '') > dateRange.to) return false;
+      return true;
+    });
+  }, [liveRatings, selectedMonth, selectedMeals, dateRange]);
+
+  const dateGroups = useMemo(() => buildDateGroups(filteredRatings), [filteredRatings]);
+
+  const averages = useMemo(() => {
+    const valid = filteredRatings.filter(r => (r.averageRating ?? 0) > 0);
+    if (!valid.length) return { overall: '—', staff: '—', hygiene: '—' };
+    const n = valid.length;
+    return {
+      overall: (valid.reduce((s, r) => s + (r.averageRating ?? 0), 0) / n).toFixed(1),
+      staff:   (valid.reduce((s, r) => s + (r.staffBehaviorRating ?? 0), 0) / n).toFixed(1),
+      hygiene: (valid.reduce((s, r) => s + (r.hygieneRating ?? 0), 0) / n).toFixed(1),
+    };
+  }, [filteredRatings]);
+
+  const tabs: { id: TabId; label: string; icon: React.ReactNode }[] = [
+    { id: 'timeline',    label: 'Timeline',        icon: <Clock size={14} />     },
+    { id: 'performance', label: 'Meal Performance', icon: <BarChart3 size={14} /> },
+    { id: 'users',       label: 'User Analytics',   icon: <Users size={14} />     },
+  ];
+
+  return (
+    <>
+      {/* Fonts */}
+      <style>{`
+        @keyframes fadeIn { from { opacity: 0 } to { opacity: 1 } }
+      `}</style>
+
+      <div style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: '#f1f5f9', padding: '0', minHeight: '100%' }}>
+
+        {/* Page Header */}
+        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 28 }}>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
+              <div style={{ display: 'inline-flex', padding: 8, background: 'rgba(245,158,11,0.15)', borderRadius: 10, color: '#fbbf24' }}>
+                <Star size={18} style={{ fill: '#fbbf24' }} />
+              </div>
+              <h1 style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", fontSize: 24, fontWeight: 800, margin: 0, letterSpacing: '-0.02em', color: '#f8fafc' }}>
+                Ratings Dashboard
+              </h1>
+            </div>
+            <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
+              Feedback analytics for mess meals · {liveRatings.length} total responses
+              {selectedMonth && ` · ${new Date(selectedMonth + '-01').toLocaleString('en-IN', { month: 'long', year: 'numeric' })}`}
+            </p>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 10 }}>
+            <Database size={13} color="#10b981" />
+            <span style={{ fontSize: 11, fontWeight: 700, color: '#10b981', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", textTransform: 'uppercase', letterSpacing: '0.08em' }}>Live</span>
+          </div>
+        </div>
+
+        {/* KPI Grid */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14, marginBottom: 28 }}>
+          <KpiCard icon={<Star size={18} style={{ fill: '#fbbf24' }} />}  label="Overall Rating" value={averages.overall} sub="/ 5.0" accent="#f59e0b" />
+          <KpiCard icon={<Pizza size={18} />}      label="Total Responses" value={filteredRatings.length} accent="#60a5fa" />
+          <KpiCard icon={<Heart size={18} />}       label="Staff Score"     value={averages.staff}   sub="/ 5.0" accent="#f472b6" />
+          <KpiCard icon={<ShieldCheck size={18} />} label="Hygiene Score"   value={averages.hygiene} sub="/ 5.0" accent="#a78bfa" />
+        </div>
+
+        {/* Heatmap */}
+        <WeeklyHeatmap ratings={filteredRatings} />
+
+        {/* Filter Bar */}
+        <FilterBar
+          months={availableMonths}
+          selectedMonth={selectedMonth} setSelectedMonth={setSelectedMonth}
+          selectedMeals={selectedMeals} toggleMeal={toggleMeal}
+          dateRange={dateRange} setDateRange={setDateRange}
+          totalCount={liveRatings.length} filteredCount={filteredRatings.length}
+        />
+
+        {/* Tabs */}
+        <div style={{ display: 'flex', gap: 4, marginBottom: 24, background: 'rgba(255,255,255,0.03)', padding: 4, borderRadius: 12, border: '1px solid rgba(255,255,255,0.06)', width: 'fit-content' }}>
+          {tabs.map(tab => {
+            const active = activeTab === tab.id;
+            return (
+              <button key={tab.id} onClick={() => setActiveTab(tab.id)} style={{
+                display: 'inline-flex', alignItems: 'center', gap: 7,
+                padding: '8px 16px', borderRadius: 9, border: 'none', cursor: 'pointer',
+                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", fontSize: 13, fontWeight: 600,
+                background: active ? '#1e293b' : 'transparent',
+                color: active ? '#f1f5f9' : '#64748b',
+                boxShadow: active ? '0 1px 6px rgba(0,0,0,0.3)' : 'none',
+                transition: 'all 0.2s',
+              }}>
+                <span style={{ color: active ? '#f59e0b' : '#475569' }}>{tab.icon}</span>
+                {tab.label}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Tab Content */}
+        <div>
+          {activeTab === 'timeline' && <TimelineView dateGroups={dateGroups} onSelect={r => setSelectedRatingId(r.id)} />}
+          {activeTab === 'performance' && <MealPerformanceView ratings={filteredRatings} />}
+          {activeTab === 'users' && <UserAnalyticsView ratings={filteredRatings} />}
+        </div>
+
       </div>
 
       {/* Detail Modal */}
-      {selectedRating && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-             <div className="bg-white dark:bg-slate-800 w-full max-w-lg rounded-3xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200 border dark:border-slate-700">
-                <div className="p-6 border-b dark:border-slate-700 flex justify-between items-center bg-slate-50 dark:bg-slate-900/50">
-                    <div>
-                        <h3 className="text-xl font-bold dark:text-white">Feedback Details</h3>
-                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">{new Date(selectedRating.timestamp).toLocaleString()}</p>
-                    </div>
-                    <button onClick={() => setSelectedRating(null)} className="p-2 hover:bg-slate-200 dark:hover:bg-slate-700 rounded-full transition-colors dark:text-slate-400">
-                        <X size={20} />
-                    </button>
-                </div>
-                
-                <div className="p-8 space-y-8 max-h-[70vh] overflow-y-auto">
-                    {/* User Info */}
-                    <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/40 dark:text-blue-400 flex items-center justify-center text-lg font-black shrink-0">
-                            {selectedRating.userName.charAt(0)}
-                        </div>
-                        <div>
-                            <p className="font-bold text-lg dark:text-slate-200">{selectedRating.userName}</p>
-                            <p className="text-slate-500 text-sm truncate max-w-[150px]">{selectedRating.userEmail}</p>
-                        </div>
-                        <div className="ml-auto text-right">
-                             <div className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-1">Meal</div>
-                             <div className="font-bold dark:text-slate-200 text-sm">{selectedRating.mealName}</div>
-                        </div>
-                    </div>
-
-                    {/* Overall Score */}
-                    <div className="flex items-center justify-between bg-blue-50 dark:bg-blue-900/20 p-4 rounded-2xl border border-blue-100 dark:border-blue-800">
-                        <span className="font-bold text-blue-800 dark:text-blue-300">Overall Experience</span>
-                        <div className="flex items-center gap-1 text-2xl font-black text-blue-600 dark:text-blue-400">
-                            {typeof selectedRating.averageRating === 'number' ? selectedRating.averageRating.toFixed(1) : selectedRating.averageRating} <Star className="fill-current" />
-                        </div>
-                    </div>
-
-                    {/* Item Ratings */}
-                    <div>
-                        <h4 className="text-xs font-black uppercase tracking-widest text-slate-400 mb-4 flex items-center gap-2">
-                           <Pizza size={14} /> Item Breakdown
-                        </h4>
-                        <div className="space-y-3">
-                            {selectedRating.itemRatings && Object.entries(selectedRating.itemRatings).map(([item, score]) => (
-                                <div key={item} className="flex items-center gap-4">
-                                    <span className="w-32 font-medium text-slate-700 dark:text-slate-300 truncate text-sm">{item}</span>
-                                    <div className="flex-1 h-2 bg-slate-100 dark:bg-slate-700 rounded-full overflow-hidden">
-                                        <div 
-                                            className={`h-full rounded-full transition-all duration-500 ${Number(score) >= 4 ? 'bg-green-500' : Number(score) >= 3 ? 'bg-yellow-500' : 'bg-red-500'}`} 
-                                            style={{ width: `${(Number(score)/5)*100}%` }}
-                                        />
-                                    </div>
-                                    <span className="font-bold dark:text-slate-200 w-6 text-right text-sm">{score}</span>
-                                </div>
-                            ))}
-                        </div>
-                    </div>
-
-                    {/* Service Ratings */}
-                    <div className="grid grid-cols-2 gap-4">
-                        <div className="p-4 rounded-xl border dark:border-slate-700 text-center bg-slate-50 dark:bg-slate-700/30">
-                            <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Staff Behavior</p>
-                            <p className="text-2xl font-black dark:text-white">{selectedRating.staffBehaviorRating}<span className="text-sm text-slate-400">/5</span></p>
-                        </div>
-                        <div className="p-4 rounded-xl border dark:border-slate-700 text-center bg-slate-50 dark:bg-slate-700/30">
-                             <p className="text-[10px] font-black uppercase tracking-widest text-slate-400 mb-2">Hygiene</p>
-                             <p className="text-2xl font-black dark:text-white">{selectedRating.hygieneRating}<span className="text-sm text-slate-400">/5</span></p>
-                        </div>
-                    </div>
-                </div>
-             </div>
-          </div>
-      )}
-    </div>
+      {selectedRating && <RatingDetailModal rating={selectedRating} onClose={() => setSelectedRatingId(null)} />}
+    </>
   );
 }
