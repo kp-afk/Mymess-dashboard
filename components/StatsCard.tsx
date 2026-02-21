@@ -1,6 +1,5 @@
-
 import React from 'react';
-import { LucideIcon, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { LucideIcon, TrendingUp, TrendingDown } from 'lucide-react';
 
 interface StatsCardProps {
   title: string;
@@ -10,34 +9,47 @@ interface StatsCardProps {
     value: number;
     isUp: boolean;
   };
-  color: 'blue' | 'green' | 'red' | 'yellow' | 'purple';
+  color: 'indigo' | 'rose' | 'amber' | 'emerald' | 'violet';
 }
 
-const colorMap = {
-  blue: 'bg-blue-50 text-blue-600 dark:bg-blue-900/20 dark:text-blue-400',
-  green: 'bg-green-50 text-green-600 dark:bg-green-900/20 dark:text-green-400',
-  red: 'bg-red-50 text-red-600 dark:bg-red-900/20 dark:text-red-400',
-  yellow: 'bg-yellow-50 text-yellow-600 dark:bg-yellow-900/20 dark:text-yellow-400',
-  purple: 'bg-purple-50 text-purple-600 dark:bg-purple-900/20 dark:text-purple-400',
+const colorMap: Record<StatsCardProps['color'], {
+  icon: string;
+  iconBg: string;
+  bar: string;
+}> = {
+  indigo:  { icon: 'text-indigo-600 dark:text-indigo-400',  iconBg: 'bg-indigo-50 dark:bg-indigo-950',  bar: 'bg-indigo-600'  },
+  rose:    { icon: 'text-rose-600 dark:text-rose-400',      iconBg: 'bg-rose-50 dark:bg-rose-950',      bar: 'bg-rose-500'    },
+  amber:   { icon: 'text-amber-600 dark:text-amber-400',    iconBg: 'bg-amber-50 dark:bg-amber-950',    bar: 'bg-amber-500'   },
+  emerald: { icon: 'text-emerald-600 dark:text-emerald-400',iconBg: 'bg-emerald-50 dark:bg-emerald-950',bar: 'bg-emerald-500' },
+  violet:  { icon: 'text-violet-600 dark:text-violet-400',  iconBg: 'bg-violet-50 dark:bg-violet-950',  bar: 'bg-violet-500'  },
 };
 
 export default function StatsCard({ title, value, icon: Icon, trend, color }: StatsCardProps) {
+  const c = colorMap[color];
   return (
-    <div className="bg-white dark:bg-slate-800 p-6 rounded-2xl border dark:border-slate-700 shadow-sm transition-all hover:shadow-md group">
+    <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl p-5 flex flex-col gap-4 transition-colors">
       <div className="flex items-start justify-between">
-        <div className={`p-3 rounded-xl ${colorMap[color]} transition-transform group-hover:scale-110`}>
-          <Icon size={24} />
+        <div className={`p-2.5 rounded-lg ${c.iconBg}`}>
+          <Icon size={18} className={c.icon} />
         </div>
         {trend && (
-          <div className={`flex items-center gap-0.5 text-xs font-bold px-2 py-1 rounded-full ${trend.isUp ? 'text-green-600 bg-green-50 dark:bg-green-900/30' : 'text-red-600 bg-red-50 dark:bg-red-900/30'}`}>
-            {trend.isUp ? <ArrowUpRight size={14} /> : <ArrowDownRight size={14} />}
+          <div className={`flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full ${
+            trend.isUp
+              ? 'text-emerald-700 bg-emerald-50 dark:text-emerald-400 dark:bg-emerald-950'
+              : 'text-rose-700 bg-rose-50 dark:text-rose-400 dark:bg-rose-950'
+          }`}>
+            {trend.isUp ? <TrendingUp size={11} /> : <TrendingDown size={11} />}
             {trend.value}%
           </div>
         )}
       </div>
-      <div className="mt-4">
-        <h3 className="text-slate-500 dark:text-slate-400 text-sm font-medium">{title}</h3>
-        <p className="text-3xl font-bold mt-1">{value}</p>
+      <div>
+        <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500 mb-1">
+          {title}
+        </p>
+        <p className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+          {value}
+        </p>
       </div>
     </div>
   );
