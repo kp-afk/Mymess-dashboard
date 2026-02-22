@@ -18,113 +18,124 @@ export default function UsersPage({ liveUsers, adminCount }: UsersProps) {
   const totalRSVPs = liveUsers.reduce((s, u) => s + (u.totalRSVPs ?? 0), 0);
 
   return (
-    <div className="space-y-6">
+    <div
+      style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace" }}
+      className="space-y-4"
+    >
 
       {/* ── Header ── */}
-      <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
+      <div className="flex items-start justify-between border-b border-[#1f1f1f] pb-4">
         <div>
-          <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
-            User Directory
-          </h1>
-          <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-0.5">
-            Registered students from Firebase RTDB
-          </p>
+          <div className="text-[10px] tracking-[0.3em] text-[#555] uppercase mb-1">Directory</div>
+          <h1 className="text-2xl text-[#e8e8e8] tracking-tight">Users</h1>
+        </div>
+        <div className="text-[10px] text-[#444] tabular-nums">
+          {new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
         </div>
       </div>
 
-      {/* ── Stats ── */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+      {/* ── KPI row ── */}
+      <div className="grid grid-cols-3 gap-2">
         {[
-          { label: 'Registered Users', value: liveUsers.length },
-          { label: 'Total RSVPs',      value: totalRSVPs       },
-          { label: 'Admin Roles',      value: adminCount       },
-        ].map(({ label, value }) => (
-          <div key={label} className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl p-5 transition-colors">
-            <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500 mb-1">
-              {label}
-            </p>
-            <p className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">{value}</p>
+          { label: 'Registered', value: liveUsers.length, color: '#38bdf8' },
+          { label: 'Total RSVPs', value: totalRSVPs, color: '#f59e0b' },
+          { label: 'Admins', value: adminCount, color: '#a78bfa' },
+        ].map(({ label, value, color }) => (
+          <div key={label} className="border border-[#1a1a1a] bg-[#0d0d0d] p-4">
+            <div className="text-[10px] tracking-[0.2em] text-[#555] uppercase mb-2">{label}</div>
+            <div className="text-3xl font-bold tabular-nums leading-none" style={{ color }}>{value}</div>
           </div>
         ))}
       </div>
 
-      {/* ── Table ── */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl overflow-hidden transition-colors">
+      {/* ── Table card ── */}
+      <div className="border border-[#1a1a1a] bg-[#0d0d0d]">
 
-        {/* Search bar */}
-        <div className="px-5 py-3.5 border-b border-zinc-100 dark:border-zinc-800">
-          <div className="relative max-w-sm">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-400" />
-            <input
-              type="text"
-              placeholder="Search by name or email…"
-              value={searchTerm}
-              onChange={e => setSearchTerm(e.target.value)}
-              className="w-full bg-zinc-50 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 border border-zinc-100 dark:border-zinc-700 rounded-lg py-2 pl-9 pr-4 text-sm outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-colors placeholder:text-zinc-400"
-            />
-          </div>
+        {/* Search */}
+        <div className="px-4 py-3 border-b border-[#1a1a1a] flex items-center gap-3">
+          <Search size={13} className="text-[#444] shrink-0" />
+          <input
+            type="text"
+            placeholder="search by name or email..."
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            className="flex-1 bg-transparent text-[13px] text-[#ccc] placeholder:text-[#333] outline-none"
+          />
+          {searchTerm && (
+            <span className="text-[10px] text-[#555] tabular-nums">
+              {filteredUsers.length}/{liveUsers.length}
+            </span>
+          )}
         </div>
 
         {/* Table */}
         <div className="overflow-x-auto">
-          <table className="w-full text-left">
-            <thead className="bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-100 dark:border-zinc-800">
-              <tr>
-                {['Student', 'RSVPs', 'Ratings', 'Last Active', 'Actions'].map(h => (
-                  <th key={h} className="px-5 py-3 text-[10px] font-semibold uppercase tracking-widest text-zinc-400">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-[#141414]">
+                {['Student', 'RSVPs', 'Ratings', 'Complaints', 'Last Active', 'Actions'].map(h => (
+                  <th key={h} className="px-4 py-3 text-left text-[10px] tracking-[0.2em] text-[#444] uppercase font-normal">
                     {h}
                   </th>
                 ))}
               </tr>
             </thead>
-            <tbody className="divide-y divide-zinc-50 dark:divide-zinc-800/60">
+            <tbody>
               {filteredUsers.length === 0 ? (
                 <tr>
-                  <td colSpan={5} className="px-5 py-12 text-center">
-                    <Users size={28} className="mx-auto mb-2 text-zinc-200 dark:text-zinc-700" />
-                    <p className="text-sm text-zinc-400">No users found.</p>
+                  <td colSpan={6} className="px-4 py-16 text-center">
+                    <Users size={24} className="mx-auto mb-3 text-[#222]" />
+                    <p className="text-[12px] text-[#444]">No users found.</p>
                   </td>
                 </tr>
-              ) : filteredUsers.map(user => (
-                <tr key={user.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors">
-                  {/* Student info */}
-                  <td className="px-5 py-3.5">
+              ) : filteredUsers.map((user, i) => (
+                <tr
+                  key={user.id}
+                  className="border-b border-[#111] hover:bg-[#0f0f0f] transition-colors"
+                >
+                  {/* Student */}
+                  <td className="px-4 py-3.5">
                     <div className="flex items-center gap-3">
-                      <div className="h-8 w-8 rounded-full bg-indigo-50 dark:bg-indigo-950 flex items-center justify-center text-xs font-bold text-indigo-600 dark:text-indigo-400 shrink-0">
+                      <div className="h-7 w-7 bg-[#f59e0b]/10 border border-[#f59e0b]/20 flex items-center justify-center text-[11px] font-bold text-[#f59e0b] shrink-0">
                         {user.name.charAt(0).toUpperCase()}
                       </div>
                       <div>
-                        <p className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">{user.name}</p>
-                        <p className="flex items-center gap-1 text-[11px] text-zinc-400 mt-0.5">
-                          <Mail size={10} /> {user.email}
-                        </p>
+                        <div className="text-[13px] text-[#ccc]">{user.name}</div>
+                        <div className="flex items-center gap-1 text-[10px] text-[#444] mt-0.5">
+                          <Mail size={9} /> {user.email}
+                        </div>
                       </div>
                     </div>
                   </td>
 
                   {/* RSVPs */}
-                  <td className="px-5 py-3.5 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                  <td className="px-4 py-3.5 text-[13px] font-bold tabular-nums text-[#38bdf8]">
                     {user.totalRSVPs}
                   </td>
 
                   {/* Ratings */}
-                  <td className="px-5 py-3.5 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
+                  <td className="px-4 py-3.5 text-[13px] font-bold tabular-nums text-[#f59e0b]">
                     {user.totalRatings}
                   </td>
 
+                  {/* Complaints */}
+                  <td className="px-4 py-3.5 text-[13px] font-bold tabular-nums text-[#f87171]">
+                    {user.totalComplaints || 0}
+                  </td>
+
                   {/* Last active */}
-                  <td className="px-5 py-3.5 text-xs text-zinc-400">
+                  <td className="px-4 py-3.5 text-[11px] text-[#555] tabular-nums">
                     {new Date(user.lastActive).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
                   </td>
 
                   {/* Actions */}
-                  <td className="px-5 py-3.5">
+                  <td className="px-4 py-3.5">
                     <div className="flex items-center gap-1">
-                      <button className="p-1.5 rounded-md text-zinc-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-950 transition-colors">
-                        <Edit2 size={14} />
+                      <button className="p-1.5 text-[#444] hover:text-[#f59e0b] hover:bg-[#f59e0b]/10 border border-transparent hover:border-[#f59e0b]/20 transition-all">
+                        <Edit2 size={13} />
                       </button>
-                      <button className="p-1.5 rounded-md text-zinc-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950 transition-colors">
-                        <Trash2 size={14} />
+                      <button className="p-1.5 text-[#444] hover:text-red-500 hover:bg-red-950/30 border border-transparent hover:border-red-900/30 transition-all">
+                        <Trash2 size={13} />
                       </button>
                     </div>
                   </td>
@@ -132,6 +143,16 @@ export default function UsersPage({ liveUsers, adminCount }: UsersProps) {
               ))}
             </tbody>
           </table>
+        </div>
+
+        {/* Footer */}
+        <div className="px-4 py-2.5 border-t border-[#111] flex items-center justify-between">
+          <span className="text-[9px] text-[#333] tracking-widest uppercase">
+            Firebase RTDB · Realtime
+          </span>
+          <span className="text-[9px] text-[#333] tabular-nums">
+            {filteredUsers.length} records
+          </span>
         </div>
       </div>
     </div>

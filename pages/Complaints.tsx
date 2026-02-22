@@ -1,54 +1,31 @@
-/**
- * Complaints.tsx — Redesigned Admin Complaints Dashboard
- * Aesthetic: Matches Ratings.tsx "Observatory" dark analytics style
- */
-
 import React, { useState, useMemo, useCallback } from 'react';
 import {
   Search, CheckCircle2, AlertCircle, Clock, Database,
-  ChevronDown, ChevronRight, X, Filter, Inbox,
-  MessageSquare, User, Calendar, Tag, ArrowRight
+  ChevronDown, X, Filter, Inbox,
+  MessageSquare, Tag, ArrowRight
 } from 'lucide-react';
 import { Complaint, ComplaintStatus } from '../types';
 import { db } from '../lib/firebase';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
 interface ComplaintsProps { liveComplaints: Complaint[] }
-
-// ─── Constants ────────────────────────────────────────────────────────────────
 
 const STATUS_ORDER: ComplaintStatus[] = ['Pending', 'In Progress', 'Resolved'];
 
 const STATUS_CONFIG: Record<ComplaintStatus, {
   color: string; bg: string; border: string;
-  icon: React.ReactNode; accent: string; dimmed: string;
+  icon: React.ReactNode; accent: string;
 }> = {
-  'Pending': {
-    color: '#f87171', bg: 'rgba(248,113,113,0.10)', border: 'rgba(248,113,113,0.25)',
-    accent: '#ef4444', dimmed: 'rgba(239,68,68,0.15)',
-    icon: <AlertCircle size={14} />,
-  },
-  'In Progress': {
-    color: '#fbbf24', bg: 'rgba(251,191,36,0.10)', border: 'rgba(251,191,36,0.25)',
-    accent: '#f59e0b', dimmed: 'rgba(245,158,11,0.15)',
-    icon: <Clock size={14} />,
-  },
-  'Resolved': {
-    color: '#34d399', bg: 'rgba(52,211,153,0.10)', border: 'rgba(52,211,153,0.25)',
-    accent: '#10b981', dimmed: 'rgba(16,185,129,0.15)',
-    icon: <CheckCircle2 size={14} />,
-  },
+  'Pending':     { color: '#f87171', bg: 'rgba(248,113,113,0.08)', border: 'rgba(248,113,113,0.2)',  accent: '#ef4444', icon: <AlertCircle size={13} /> },
+  'In Progress': { color: '#f59e0b', bg: 'rgba(245,158,11,0.08)',  border: 'rgba(245,158,11,0.2)',  accent: '#f59e0b', icon: <Clock size={13} /> },
+  'Resolved':    { color: '#4ade80', bg: 'rgba(74,222,128,0.08)',  border: 'rgba(74,222,128,0.2)',  accent: '#22c55e', icon: <CheckCircle2 size={13} /> },
 };
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
+const MONO = "'Geist Mono','JetBrains Mono','Fira Code',monospace";
 
 function formatTs(ts: number | string | undefined): string {
   if (!ts) return '—';
-  try {
-    const d = new Date(typeof ts === 'string' ? ts : ts);
-    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' });
-  } catch { return '—'; }
+  try { return new Date(typeof ts === 'string' ? ts : ts).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }); }
+  catch { return '—'; }
 }
 
 function timeAgo(ts: number | undefined): string {
@@ -59,77 +36,68 @@ function timeAgo(ts: number | undefined): string {
   if (m < 60) return `${m}m ago`;
   const h = Math.floor(m / 60);
   if (h < 24) return `${h}h ago`;
-  const d = Math.floor(h / 24);
-  return `${d}d ago`;
+  return `${Math.floor(h / 24)}d ago`;
 }
-
-// ─── Firebase updater ─────────────────────────────────────────────────────────
 
 async function updateStatus(id: string, next: ComplaintStatus): Promise<void> {
   await db.collection('complaints').doc(id).update({ status: next, updatedAt: Date.now() });
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
+// ── Status Badge ────────────────────────────────────────────────────────────
 
-function StatusPill({ status }: { status: ComplaintStatus }) {
+function StatusBadge({ status }: { status: ComplaintStatus }) {
   const cfg = STATUS_CONFIG[status];
   return (
     <span style={{
       display: 'inline-flex', alignItems: 'center', gap: 5,
-      padding: '3px 10px', borderRadius: 20,
+      padding: '3px 10px',
       background: cfg.bg, color: cfg.color, border: `1px solid ${cfg.border}`,
-      fontSize: 11, fontWeight: 700, letterSpacing: '0.04em',
-      fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-      whiteSpace: 'nowrap',
+      fontSize: 10, fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+      fontFamily: MONO, whiteSpace: 'nowrap',
     }}>
       {cfg.icon} {status}
     </span>
   );
 }
 
-function CategoryPill({ category }: { category: string }) {
+// ── Category Badge ───────────────────────────────────────────────────────────
+
+function CategoryBadge({ category }: { category: string }) {
   return (
     <span style={{
-      display: 'inline-flex', alignItems: 'center', gap: 5,
-      padding: '3px 9px', borderRadius: 6,
-      background: 'rgba(99,102,241,0.12)', color: '#818cf8',
-      border: '1px solid rgba(99,102,241,0.22)',
-      fontSize: 10, fontWeight: 700, textTransform: 'uppercase',
-      letterSpacing: '0.07em',
-      fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace",
+      display: 'inline-flex', alignItems: 'center', gap: 4,
+      padding: '2px 8px',
+      background: 'rgba(245,158,11,0.08)', color: '#f59e0b',
+      border: '1px solid rgba(245,158,11,0.2)',
+      fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em',
+      fontFamily: MONO,
     }}>
-      <Tag size={9} /> {category}
+      <Tag size={8} /> {category}
     </span>
   );
 }
 
-function KpiCard({ icon, label, value, accent, sub }: {
-  icon: React.ReactNode; label: string; value: number; accent: string; sub?: string;
-}) {
+// ── KPI Card ─────────────────────────────────────────────────────────────────
+
+function KpiCard({ label, value, color, icon }: { label: string; value: number; color: string; icon: React.ReactNode }) {
   return (
     <div style={{
-      background: 'rgba(255,255,255,0.03)', border: `1px solid rgba(255,255,255,0.07)`,
-      borderRadius: 16, padding: '20px 24px', position: 'relative', overflow: 'hidden',
+      background: '#0d0d0d', border: `1px solid #1a1a1a`,
+      padding: '16px 20px', fontFamily: MONO,
     }}>
-      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${accent}, transparent)` }} />
-      <div style={{ display: 'inline-flex', padding: 8, background: `${accent}1a`, borderRadius: 10, color: accent, marginBottom: 14 }}>
-        {icon}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+        <span style={{ fontSize: 10, letterSpacing: '0.2em', textTransform: 'uppercase', color: '#555' }}>{label}</span>
+        <span style={{ color, opacity: 0.6 }}>{icon}</span>
       </div>
-      <p style={{ fontSize: 11, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.1em', color: '#64748b', marginBottom: 6, fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>{label}</p>
-      <p style={{ fontSize: 30, fontWeight: 800, color: '#f8fafc', lineHeight: 1, fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", margin: 0 }}>
-        {value}
-        {sub && <span style={{ fontSize: 13, fontWeight: 400, color: '#64748b', marginLeft: 6 }}>{sub}</span>}
-      </p>
+      <div style={{ fontSize: 28, fontWeight: 700, color, lineHeight: 1}}>{value}</div>
     </div>
   );
 }
 
-// ─── Confirm Modal ────────────────────────────────────────────────────────────
+// ── Confirm Modal ─────────────────────────────────────────────────────────────
 
 function ConfirmResolveModal({ complaint, onConfirm, onCancel }: {
-  complaint: Complaint;
-  onConfirm: () => void;
-  onCancel: () => void;
+  complaint: Complaint; onConfirm: () => void; onCancel: () => void;
 }) {
   return (
     <div
@@ -137,85 +105,66 @@ function ConfirmResolveModal({ complaint, onConfirm, onCancel }: {
       style={{
         position: 'fixed', inset: 0, zIndex: 50,
         display: 'flex', alignItems: 'center', justifyContent: 'center',
-        padding: 16, background: 'rgba(2,6,23,0.80)', backdropFilter: 'blur(6px)',
-        animation: 'fadeIn 0.15s ease',
+        padding: 16, background: 'rgba(0,0,0,0.85)', backdropFilter: 'blur(4px)',
       }}
     >
       <div
         onClick={e => e.stopPropagation()}
         style={{
-          background: '#0f172a', borderRadius: 18, width: '100%', maxWidth: 420,
-          border: '1px solid rgba(52,211,153,0.25)',
-          boxShadow: '0 0 0 1px rgba(52,211,153,0.08), 0 24px 48px rgba(0,0,0,0.6)',
-          overflow: 'hidden',
+          background: '#0d0d0d', width: '100%', maxWidth: 420,
+          border: '1px solid rgba(74,222,128,0.2)',
+          boxShadow: '0 24px 48px rgba(0,0,0,0.8)',
+          fontFamily: MONO, overflow: 'hidden',
         }}
       >
-        {/* Green top strip */}
-        <div style={{ height: 3, background: 'linear-gradient(90deg, #10b981, transparent)' }} />
-
-        <div style={{ padding: '24px 26px' }}>
-          {/* Icon + heading */}
+        <div style={{ height: 2, background: 'linear-gradient(90deg, #22c55e, transparent)' }} />
+        <div style={{ padding: '24px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 16 }}>
             <div style={{
-              width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
-              background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.3)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#34d399',
+              width: 36, height: 36, flexShrink: 0, background: 'rgba(74,222,128,0.1)',
+              border: '1px solid rgba(74,222,128,0.25)', display: 'flex', alignItems: 'center',
+              justifyContent: 'center', color: '#4ade80',
             }}>
-              <CheckCircle2 size={18} />
+              <CheckCircle2 size={16} />
             </div>
             <div>
-              <p style={{ fontSize: 15, fontWeight: 700, color: '#f1f5f9', margin: '0 0 2px' }}>Mark as Resolved?</p>
-              <p style={{ fontSize: 12, color: '#64748b', margin: 0 }}>This will move the complaint out of the active queue.</p>
+              <p style={{ fontSize: 14, fontWeight: 700, color: '#e8e8e8', margin: '0 0 2px' }}>Mark as Resolved?</p>
+              <p style={{ fontSize: 11, color: '#555', margin: 0 }}>Moves complaint out of active queue.</p>
             </div>
           </div>
 
-          {/* Complaint preview */}
-          <div style={{
-            background: 'rgba(255,255,255,0.03)', border: '1px solid rgba(255,255,255,0.08)',
-            borderRadius: 10, padding: '12px 14px', marginBottom: 22,
-          }}>
+          <div style={{ background: '#111', border: '1px solid #1f1f1f', padding: '12px 14px', marginBottom: 20 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>{complaint.userName}</span>
-              <CategoryPill category={complaint.category} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#ccc' }}>{complaint.userName}</span>
+              <CategoryBadge category={complaint.category} />
             </div>
             <p style={{
-              fontSize: 12, color: '#94a3b8', margin: 0, lineHeight: 1.55,
+              fontSize: 11, color: '#666', margin: 0, lineHeight: 1.6,
               display: '-webkit-box', WebkitLineClamp: 3, WebkitBoxOrient: 'vertical', overflow: 'hidden',
             }}>
               {complaint.complaintText}
             </p>
           </div>
 
-          {/* Buttons */}
-          <div style={{ display: 'flex', gap: 10 }}>
+          <div style={{ display: 'flex', gap: 8 }}>
             <button
               onClick={onCancel}
               style={{
-                flex: 1, padding: '10px 0', borderRadius: 10,
-                background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.1)',
-                color: '#94a3b8', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                transition: 'all 0.15s',
+                flex: 1, padding: '10px 0', background: '#111',
+                border: '1px solid #2a2a2a', color: '#666', fontSize: 12, fontWeight: 700,
+                cursor: 'pointer', fontFamily: MONO, letterSpacing: '0.1em', textTransform: 'uppercase',
               }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.09)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(255,255,255,0.05)'; }}
-            >
-              Cancel
-            </button>
+            >Cancel</button>
             <button
               onClick={onConfirm}
               style={{
-                flex: 1, padding: '10px 0', borderRadius: 10,
-                background: 'rgba(16,185,129,0.18)', border: '1px solid rgba(52,211,153,0.4)',
-                color: '#34d399', fontSize: 13, fontWeight: 700, cursor: 'pointer',
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                transition: 'all 0.15s', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 7,
+                flex: 1, padding: '10px 0',
+                background: 'rgba(74,222,128,0.1)', border: '1px solid rgba(74,222,128,0.3)',
+                color: '#4ade80', fontSize: 12, fontWeight: 700,
+                cursor: 'pointer', fontFamily: MONO, letterSpacing: '0.1em', textTransform: 'uppercase',
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               }}
-              onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(16,185,129,0.28)'; }}
-              onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(16,185,129,0.18)'; }}
-            >
-              <CheckCircle2 size={13} /> Confirm Resolve
-            </button>
+            ><CheckCircle2 size={12} /> Confirm</button>
           </div>
         </div>
       </div>
@@ -223,7 +172,7 @@ function ConfirmResolveModal({ complaint, onConfirm, onCancel }: {
   );
 }
 
-// ─── Complaint Card ───────────────────────────────────────────────────────────
+// ── Complaint Row ─────────────────────────────────────────────────────────────
 
 function ComplaintCard({ complaint, onStatusChange }: {
   complaint: Complaint;
@@ -233,59 +182,52 @@ function ComplaintCard({ complaint, onStatusChange }: {
   const [loading, setLoading] = useState(false);
   const [confirmPending, setConfirmPending] = useState(false);
   const cfg = STATUS_CONFIG[complaint.status];
+  const isLong = complaint.complaintText?.length > 120;
 
   const handleAction = async (next: ComplaintStatus) => {
     setLoading(true);
     try { await onStatusChange(complaint.id, next); }
     catch (err: any) {
-      console.error(err);
       alert(err.code === 'permission-denied'
-        ? 'ACCESS DENIED: You are not authorized to update complaints.'
-        : 'Failed to update status. Check console for details.');
+        ? 'ACCESS DENIED: Not authorized to update complaints.'
+        : 'Failed to update status.');
     } finally { setLoading(false); }
   };
 
-  const isLong = complaint.complaintText?.length > 120;
-
   return (
     <div style={{
-      background: 'rgba(255,255,255,0.02)',
-      border: `1px solid ${complaint.status === 'Pending' ? cfg.border : 'rgba(255,255,255,0.07)'}`,
-      borderRadius: 12, overflow: 'hidden',
-      transition: 'border-color 0.2s',
-      opacity: complaint.status === 'Resolved' ? 0.65 : 1,
+      background: '#0d0d0d',
+      border: `1px solid ${complaint.status === 'Pending' ? cfg.border : '#1a1a1a'}`,
+      opacity: complaint.status === 'Resolved' ? 0.6 : 1,
+      fontFamily: MONO,
     }}>
-      {/* Top accent for Pending */}
       {complaint.status === 'Pending' && (
         <div style={{ height: 2, background: `linear-gradient(90deg, ${cfg.accent}, transparent)` }} />
       )}
-
       <div style={{ padding: '14px 18px' }}>
-        {/* Row 1: User + meta + status + actions */}
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
           {/* Avatar */}
           <div style={{
-            width: 34, height: 34, borderRadius: '50%', flexShrink: 0,
-            background: cfg.dimmed, border: `1px solid ${cfg.border}`,
+            width: 32, height: 32, flexShrink: 0,
+            background: `${cfg.color}12`, border: `1px solid ${cfg.border}`,
             display: 'flex', alignItems: 'center', justifyContent: 'center',
-            color: cfg.color, fontSize: 13, fontWeight: 800,
-            fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace",
+            color: cfg.color, fontSize: 12, fontWeight: 800,
           }}>
             {complaint.userName?.charAt(0)?.toUpperCase() ?? '?'}
           </div>
 
-          {/* Name + email + time */}
+          {/* Info */}
           <div style={{ flex: 1, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 3 }}>
-              <span style={{ fontSize: 13, fontWeight: 700, color: '#e2e8f0' }}>{complaint.userName}</span>
-              <CategoryPill category={complaint.category} />
+              <span style={{ fontSize: 13, fontWeight: 700, color: '#ccc' }}>{complaint.userName}</span>
+              <CategoryBadge category={complaint.category} />
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ fontSize: 11, color: '#475569', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }}>{complaint.userEmail}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <span style={{ fontSize: 10, color: '#444' }}>{complaint.userEmail}</span>
               {complaint.timestamp && (
                 <>
-                  <span style={{ color: '#1e293b', fontSize: 10 }}>·</span>
-                  <span style={{ fontSize: 10, color: '#475569', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace" }} title={formatTs(complaint.timestamp)}>
+                  <span style={{ color: '#222' }}>·</span>
+                  <span style={{ fontSize: 10, color: '#444' }} title={formatTs(complaint.timestamp)}>
                     {timeAgo(complaint.timestamp)}
                   </span>
                 </>
@@ -293,60 +235,56 @@ function ComplaintCard({ complaint, onStatusChange }: {
             </div>
           </div>
 
-          {/* Status + action buttons */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-            <StatusPill status={complaint.status} />
+          {/* Actions */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0, flexWrap: 'wrap' }}>
+            <StatusBadge status={complaint.status} />
             {complaint.status === 'Pending' && (
-              <button onClick={() => handleAction('In Progress')} disabled={loading} style={{
-                display: 'inline-flex', alignItems: 'center', gap: 5,
-                padding: '5px 12px', borderRadius: 8, border: `1px solid rgba(251,191,36,0.3)`,
-                background: 'rgba(251,191,36,0.1)', color: '#fbbf24',
-                fontSize: 11, fontWeight: 700, cursor: loading ? 'wait' : 'pointer',
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                transition: 'all 0.15s',
-              }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(251,191,36,0.22)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(251,191,36,0.1)'; }}
-              >
-                <ArrowRight size={11} /> Start
-              </button>
+              <button
+                onClick={() => handleAction('In Progress')}
+                disabled={loading}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px',
+                  border: '1px solid rgba(245,158,11,0.25)', background: 'rgba(245,158,11,0.08)',
+                  color: '#f59e0b', fontSize: 10, fontWeight: 700, cursor: loading ? 'wait' : 'pointer',
+                  fontFamily: MONO, letterSpacing: '0.1em', textTransform: 'uppercase',
+                }}
+              ><ArrowRight size={10} /> Start</button>
             )}
             {complaint.status !== 'Resolved' && (
-              <button onClick={() => setConfirmPending(true)} disabled={loading} style={{
-                display: 'inline-flex', alignItems: 'center', gap: 5,
-                padding: '5px 12px', borderRadius: 8, border: `1px solid rgba(52,211,153,0.3)`,
-                background: 'rgba(52,211,153,0.1)', color: '#34d399',
-                fontSize: 11, fontWeight: 700, cursor: loading ? 'wait' : 'pointer',
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                transition: 'all 0.15s',
-              }}
-                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(52,211,153,0.22)'; }}
-                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.background = 'rgba(52,211,153,0.1)'; }}
-              >
-                <CheckCircle2 size={11} /> Resolve
-              </button>
+              <button
+                onClick={() => setConfirmPending(true)}
+                disabled={loading}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px',
+                  border: '1px solid rgba(74,222,128,0.25)', background: 'rgba(74,222,128,0.08)',
+                  color: '#4ade80', fontSize: 10, fontWeight: 700, cursor: loading ? 'wait' : 'pointer',
+                  fontFamily: MONO, letterSpacing: '0.1em', textTransform: 'uppercase',
+                }}
+              ><CheckCircle2 size={10} /> Resolve</button>
             )}
           </div>
         </div>
 
-        {/* Row 2: Complaint text */}
-        <div style={{ marginTop: 12, paddingLeft: 46 }}>
+        {/* Complaint text */}
+        <div style={{ marginTop: 10, paddingLeft: 44 }}>
           <p style={{
-            fontSize: 13, color: '#94a3b8', lineHeight: 1.6, margin: 0,
+            fontSize: 12, color: '#888', lineHeight: 1.6, margin: 0,
             display: '-webkit-box', WebkitLineClamp: expanded ? 'unset' : 2,
             WebkitBoxOrient: 'vertical', overflow: expanded ? 'visible' : 'hidden',
           }}>
             {complaint.complaintText}
           </p>
           {isLong && (
-            <button onClick={() => setExpanded(p => !p)} style={{
-              marginTop: 6, background: 'none', border: 'none', cursor: 'pointer',
-              color: '#4f86f7', fontSize: 11, fontWeight: 600, padding: 0,
-              display: 'flex', alignItems: 'center', gap: 3,
-              fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-            }}>
+            <button
+              onClick={() => setExpanded(p => !p)}
+              style={{
+                marginTop: 5, background: 'none', border: 'none', cursor: 'pointer',
+                color: '#f59e0b', fontSize: 10, fontWeight: 700, padding: 0,
+                fontFamily: MONO, letterSpacing: '0.05em', display: 'flex', alignItems: 'center', gap: 3,
+              }}
+            >
               {expanded ? 'Show less' : 'Read more'}
-              <ChevronDown size={11} style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
+              <ChevronDown size={10} style={{ transform: expanded ? 'rotate(180deg)' : 'none', transition: 'transform 0.2s' }} />
             </button>
           )}
         </div>
@@ -363,7 +301,7 @@ function ComplaintCard({ complaint, onStatusChange }: {
   );
 }
 
-// ─── Status Group ─────────────────────────────────────────────────────────────
+// ── Status Group ──────────────────────────────────────────────────────────────
 
 function StatusGroup({ status, complaints, onStatusChange, defaultOpen }: {
   status: ComplaintStatus;
@@ -375,32 +313,37 @@ function StatusGroup({ status, complaints, onStatusChange, defaultOpen }: {
   const cfg = STATUS_CONFIG[status];
 
   return (
-    <div style={{ borderRadius: 14, overflow: 'hidden', border: `1px solid ${open ? cfg.border : 'rgba(255,255,255,0.07)'}`, transition: 'border-color 0.2s' }}>
-      {/* Group header */}
-      <button onClick={() => setOpen(p => !p)} style={{
-        width: '100%', display: 'flex', alignItems: 'center', gap: 12,
-        padding: '14px 20px', background: open ? cfg.bg : 'rgba(255,255,255,0.02)',
-        border: 'none', cursor: 'pointer', textAlign: 'left', transition: 'background 0.2s',
-      }}>
+    <div style={{ border: `1px solid ${open ? cfg.border : '#1a1a1a'}`, fontFamily: MONO }}>
+      <button
+        onClick={() => setOpen(p => !p)}
+        style={{
+          width: '100%', display: 'flex', alignItems: 'center', gap: 10,
+          padding: '13px 18px', background: open ? cfg.bg : 'transparent',
+          border: 'none', cursor: 'pointer', textAlign: 'left',
+        }}
+      >
         <span style={{ color: cfg.color }}>{cfg.icon}</span>
-        <span style={{ fontWeight: 700, fontSize: 14, color: '#f1f5f9' }}>{status}</span>
+        <span style={{ fontSize: 13, fontWeight: 700, color: '#ccc', letterSpacing: '0.02em' }}>{status}</span>
         <span style={{
-          fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace",
-          fontSize: 11, fontWeight: 700,
-          padding: '2px 9px', borderRadius: 20,
-          background: cfg.dimmed, color: cfg.color,
-          border: `1px solid ${cfg.border}`,
+          fontSize: 10, fontWeight: 700, padding: '2px 8px',
+          background: `${cfg.color}12`, color: cfg.color, border: `1px solid ${cfg.border}`,
+          fontFamily: MONO, letterSpacing: '0.1em',
         }}>
           {complaints.length}
         </span>
-        <ChevronDown size={15} color="#64748b" style={{ marginLeft: 'auto', transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'none' }} />
+        <ChevronDown
+          size={14}
+          color="#555"
+          style={{ marginLeft: 'auto', transition: 'transform 0.2s', transform: open ? 'rotate(180deg)' : 'none' }}
+        />
       </button>
 
-      {/* Cards */}
       {open && (
-        <div style={{ padding: '0 12px 12px', display: 'flex', flexDirection: 'column', gap: 8, background: 'rgba(0,0,0,0.15)' }}>
+        <div style={{ padding: '0 10px 10px', display: 'flex', flexDirection: 'column', gap: 6, background: '#080808' }}>
           {complaints.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '28px 0', color: '#334155', fontSize: 12 }}>No {status.toLowerCase()} complaints.</div>
+            <div style={{ textAlign: 'center', padding: '24px 0', color: '#333', fontSize: 11 }}>
+              No {status.toLowerCase()} complaints.
+            </div>
           ) : (
             complaints.map(c => (
               <ComplaintCard key={c.id} complaint={c} onStatusChange={onStatusChange} />
@@ -412,7 +355,7 @@ function StatusGroup({ status, complaints, onStatusChange, defaultOpen }: {
   );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 export default function Complaints({ liveComplaints }: ComplaintsProps) {
   const [search, setSearch] = useState('');
@@ -427,7 +370,6 @@ export default function Complaints({ liveComplaints }: ComplaintsProps) {
     await updateStatus(id, next);
   }, []);
 
-  // Filter
   const filtered = useMemo(() => {
     const q = search.toLowerCase();
     return liveComplaints.filter(c => {
@@ -437,14 +379,11 @@ export default function Complaints({ liveComplaints }: ComplaintsProps) {
     });
   }, [liveComplaints, search, selectedCategory]);
 
-  // Group by status, each group sorted newest-first
   const grouped = useMemo(() => {
     const map: Record<ComplaintStatus, Complaint[]> = { 'Pending': [], 'In Progress': [], 'Resolved': [] };
     for (const c of filtered) {
       if (map[c.status as ComplaintStatus]) map[c.status as ComplaintStatus].push(c);
     }
-    // Pending & In Progress: oldest first (most overdue at top)
-    // Resolved: newest first (most recently closed at top)
     map['Pending'].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
     map['In Progress'].sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
     map['Resolved'].sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0));
@@ -461,112 +400,110 @@ export default function Complaints({ liveComplaints }: ComplaintsProps) {
     ? Math.round((counts.resolved / liveComplaints.length) * 100) : 0;
 
   return (
-    <>
-      <style>{`@keyframes fadeIn { from { opacity:0 } to { opacity:1 } }`}</style>
+    <div style={{ fontFamily: MONO, color: '#d4d4d4' }}>
 
-      <div style={{ fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif", color: '#f1f5f9', minHeight: '100%', animation: 'fadeIn 0.3s ease' }}>
-
-        {/* Page Header */}
-        <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 16, marginBottom: 28 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 6 }}>
-              <div style={{ display: 'inline-flex', padding: 8, background: 'rgba(248,113,113,0.15)', borderRadius: 10, color: '#f87171' }}>
-                <MessageSquare size={18} />
-              </div>
-              <h1 style={{ fontSize: 24, fontWeight: 800, margin: 0, letterSpacing: '-0.02em', color: '#f8fafc' }}>
-                Complaints
-              </h1>
-            </div>
-            <p style={{ fontSize: 13, color: '#64748b', margin: 0 }}>
-              Live feed from Firestore · {liveComplaints.length} total ·&nbsp;
-              <span style={{ color: resolutionRate >= 70 ? '#34d399' : resolutionRate >= 40 ? '#fbbf24' : '#f87171', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontWeight: 700 }}>{resolutionRate}%</span>
-              &nbsp;resolved
-            </p>
+      {/* ── Header ── */}
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 20, paddingBottom: 16, borderBottom: '1px solid #1f1f1f' }}>
+        <div>
+          <div style={{ fontSize: 10, letterSpacing: '0.3em', textTransform: 'uppercase', color: '#555', marginBottom: 4 }}>
+            Grievances
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', background: 'rgba(16,185,129,0.1)', border: '1px solid rgba(16,185,129,0.2)', borderRadius: 10 }}>
-            <Database size={13} color="#10b981" />
-            <span style={{ fontSize: 11, fontWeight: 700, color: '#10b981', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", textTransform: 'uppercase', letterSpacing: '0.08em' }}>Live</span>
-          </div>
+          <h1 style={{ fontSize: 24, fontWeight: 700, color: '#e8e8e8', margin: 0, letterSpacing: '-0.01em' }}>Complaints</h1>
+          <p style={{ fontSize: 11, color: '#555', margin: '4px 0 0' }}>
+            {liveComplaints.length} total ·&nbsp;
+            <span style={{ color: resolutionRate >= 70 ? '#4ade80' : resolutionRate >= 40 ? '#f59e0b' : '#f87171', fontWeight: 700 }}>
+              {resolutionRate}%
+            </span>
+            &nbsp;resolved
+          </p>
         </div>
-
-        {/* KPI Cards */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 14, marginBottom: 28 }}>
-          <KpiCard icon={<AlertCircle size={18} />}  label="Pending"     value={counts.pending}    accent="#ef4444" />
-          <KpiCard icon={<Clock size={18} />}         label="In Progress" value={counts.inProgress} accent="#f59e0b" />
-          <KpiCard icon={<CheckCircle2 size={18} />}  label="Resolved"    value={counts.resolved}   accent="#10b981" />
-          <KpiCard icon={<MessageSquare size={18} />} label="Total"       value={liveComplaints.length} accent="#818cf8" sub={`· ${resolutionRate}% resolved`} />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '7px 12px', background: 'rgba(74,222,128,0.06)', border: '1px solid rgba(74,222,128,0.15)' }}>
+          <Database size={11} color="#4ade80" />
+          <span style={{ fontSize: 10, fontWeight: 700, color: '#4ade80', letterSpacing: '0.2em', textTransform: 'uppercase' }}>Live</span>
         </div>
-
-        {/* Search + Category filter bar */}
-        <div style={{
-          display: 'flex', flexWrap: 'wrap', gap: 12, alignItems: 'center',
-          padding: '14px 18px', background: 'rgba(255,255,255,0.03)',
-          border: '1px solid rgba(255,255,255,0.07)', borderRadius: 14, marginBottom: 24,
-        }}>
-          {/* Search */}
-          <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
-            <Search size={14} style={{ position: 'absolute', left: 12, top: '50%', transform: 'translateY(-50%)', color: '#475569' }} />
-            <input
-              type="text" placeholder="Search by name, category or text…"
-              value={search} onChange={e => setSearch(e.target.value)}
-              style={{
-                width: '100%', background: 'rgba(255,255,255,0.05)',
-                border: '1px solid rgba(255,255,255,0.1)', borderRadius: 9,
-                padding: '8px 12px 8px 34px', color: '#f1f5f9', fontSize: 13, outline: 'none',
-                fontFamily: "-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif",
-                boxSizing: 'border-box',
-              }}
-            />
-          </div>
-
-          {/* Category pills */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-            <Filter size={13} color="#475569" />
-            {categories.map(cat => {
-              const active = selectedCategory === cat;
-              return (
-                <button key={cat} onClick={() => setSelectedCategory(cat)} style={{
-                  padding: '5px 12px', borderRadius: 20,
-                  border: `1px solid ${active ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.08)'}`,
-                  background: active ? 'rgba(99,102,241,0.15)' : 'transparent',
-                  color: active ? '#818cf8' : '#64748b',
-                  fontSize: 11, fontWeight: 700, cursor: 'pointer', transition: 'all 0.15s',
-                  textTransform: 'uppercase', letterSpacing: '0.06em',
-                  fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace",
-                }}>
-                  {cat}
-                </button>
-              );
-            })}
-          </div>
-
-          <span style={{ marginLeft: 'auto', fontFamily: "ui-monospace, 'SF Mono', 'Fira Code', monospace", fontSize: 11, color: '#475569', whiteSpace: 'nowrap' }}>
-            {filtered.length !== liveComplaints.length
-              ? <><span style={{ color: '#f1f5f9', fontWeight: 700 }}>{filtered.length}</span> / {liveComplaints.length}</>
-              : <span style={{ color: '#f1f5f9', fontWeight: 700 }}>{liveComplaints.length} complaints</span>}
-          </span>
-        </div>
-
-        {/* Grouped complaint lists */}
-        {filtered.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '60px 0', color: '#334155' }}>
-            <Inbox size={42} style={{ margin: '0 auto 14px', opacity: 0.2 }} />
-            <p style={{ fontSize: 14 }}>No complaints match your filters.</p>
-          </div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-            {STATUS_ORDER.map(status => (
-              <StatusGroup
-                key={status}
-                status={status}
-                complaints={grouped[status]}
-                onStatusChange={handleStatusChange}
-                defaultOpen={status !== 'Resolved'}
-              />
-            ))}
-          </div>
-        )}
       </div>
-    </>
+
+      {/* ── KPIs ── */}
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8, marginBottom: 20 }}>
+        <KpiCard label="Pending"     value={counts.pending}          color="#f87171" icon={<AlertCircle size={14} />} />
+        <KpiCard label="In Progress" value={counts.inProgress}       color="#f59e0b" icon={<Clock size={14} />} />
+        <KpiCard label="Resolved"    value={counts.resolved}         color="#4ade80" icon={<CheckCircle2 size={14} />} />
+        <KpiCard label="Total"       value={liveComplaints.length}   color="#a78bfa" icon={<MessageSquare size={14} />} />
+      </div>
+
+      {/* ── Filter bar ── */}
+      <div style={{
+        display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center',
+        padding: '12px 16px', background: '#0d0d0d', border: '1px solid #1a1a1a',
+        marginBottom: 16,
+      }}>
+        {/* Search */}
+        <div style={{ position: 'relative', flex: 1, minWidth: 200 }}>
+          <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: '#444' }} />
+          <input
+            type="text"
+            placeholder="search by name, category or text..."
+            value={search}
+            onChange={e => setSearch(e.target.value)}
+            style={{
+              width: '100%', background: '#111', border: '1px solid #1f1f1f',
+              padding: '8px 12px 8px 30px', color: '#ccc', fontSize: 12, outline: 'none',
+              fontFamily: MONO, boxSizing: 'border-box',
+            }}
+          />
+        </div>
+
+        {/* Category pills */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }}>
+          <Filter size={12} color="#444" />
+          {categories.map(cat => {
+            const active = selectedCategory === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                style={{
+                  padding: '4px 10px',
+                  border: `1px solid ${active ? 'rgba(245,158,11,0.4)' : '#1f1f1f'}`,
+                  background: active ? 'rgba(245,158,11,0.1)' : 'transparent',
+                  color: active ? '#f59e0b' : '#555',
+                  fontSize: 10, fontWeight: 700, cursor: 'pointer',
+                  textTransform: 'uppercase', letterSpacing: '0.1em',
+                  fontFamily: MONO,
+                }}
+              >{cat}</button>
+            );
+          })}
+        </div>
+
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: '#444' }}>
+          {filtered.length !== liveComplaints.length ? (
+            <><span style={{ color: '#ccc', fontWeight: 700 }}>{filtered.length}</span> / {liveComplaints.length}</>
+          ) : (
+            <span style={{ color: '#ccc', fontWeight: 700 }}>{liveComplaints.length} complaints</span>
+          )}
+        </span>
+      </div>
+
+      {/* ── Grouped lists ── */}
+      {filtered.length === 0 ? (
+        <div style={{ textAlign: 'center', padding: '60px 0', color: '#333' }}>
+          <Inbox size={36} style={{ margin: '0 auto 14px', opacity: 0.3 }} />
+          <p style={{ fontSize: 13 }}>No complaints match your filters.</p>
+        </div>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+          {STATUS_ORDER.map(status => (
+            <StatusGroup
+              key={status}
+              status={status}
+              complaints={grouped[status]}
+              onStatusChange={handleStatusChange}
+              defaultOpen={status !== 'Resolved'}
+            />
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

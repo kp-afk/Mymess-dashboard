@@ -1,9 +1,7 @@
 import React, { useState } from 'react';
-import { FileText, Download, BarChart2, MessageSquare, Star } from 'lucide-react';
+import { FileText, Download, BarChart2, MessageSquare, Star, Users } from 'lucide-react';
 import { Complaint, Rating, User, DailyStats } from '../types';
 import type { MealType } from '../types';
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
 
 function escapeCsv(val: unknown): string {
   const s = String(val ?? '').replace(/"/g, '""');
@@ -14,8 +12,6 @@ function todayStr(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-// ─── Props ────────────────────────────────────────────────────────────────────
-
 interface ReportsProps {
   complaints: Complaint[];
   ratings: Rating[];
@@ -24,52 +20,6 @@ interface ReportsProps {
   attendanceByMeal: { Breakfast: number; Lunch: number; Dinner: number };
   activeMealInfo: { meal: MealType; isLive: boolean; isTomorrow?: boolean; date: string };
 }
-
-// ─── Report card ─────────────────────────────────────────────────────────────
-
-interface ReportCardProps {
-  icon: React.ReactNode;
-  title: string;
-  desc: string;
-  badge: string;
-  count: number;
-  loading: boolean;
-  onDownload: () => void;
-}
-
-function ReportCard({ icon, title, desc, badge, count, loading, onDownload }: ReportCardProps) {
-  return (
-    <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl p-5 flex flex-col gap-4 transition-colors">
-      <div className="flex items-start justify-between">
-        <div className="p-2.5 bg-indigo-50 dark:bg-indigo-950 rounded-lg text-indigo-600 dark:text-indigo-400">
-          {icon}
-        </div>
-        <span className="text-[10px] font-semibold uppercase tracking-widest text-zinc-400 bg-zinc-50 dark:bg-zinc-800 border border-zinc-100 dark:border-zinc-700 px-2 py-0.5 rounded">
-          {badge}
-        </span>
-      </div>
-
-      <div className="flex-1">
-        <h3 className="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{title}</h3>
-        <p className="text-xs text-zinc-400 mt-1 leading-relaxed">{desc}</p>
-      </div>
-
-      <div className="flex items-center justify-between pt-1 border-t border-zinc-50 dark:border-zinc-800">
-        <span className="text-xs text-zinc-400">{count} records</span>
-        <button
-          onClick={onDownload}
-          disabled={loading}
-          className="inline-flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white px-3 py-1.5 rounded-lg text-xs font-semibold transition-colors disabled:opacity-50"
-        >
-          <Download size={13} />
-          {loading ? 'Exporting…' : 'Download'}
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ─── Main ─────────────────────────────────────────────────────────────────────
 
 export default function Reports({
   complaints,
@@ -82,11 +32,11 @@ export default function Reports({
   const [downloading, setDownloading] = useState<string | null>(null);
 
   const downloadCsv = (filename: string, rows: string[][]) => {
-    const csv  = rows.map(r => r.map(escapeCsv).join(',')).join('\n');
+    const csv = rows.map(r => r.map(escapeCsv).join(',')).join('\n');
     const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-    const url  = URL.createObjectURL(blob);
-    const a    = document.createElement('a');
-    a.href     = url;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
     a.download = filename;
     a.click();
     URL.revokeObjectURL(url);
@@ -95,7 +45,7 @@ export default function Reports({
   const handleAttendanceReport = () => {
     setDownloading('attendance');
     const headers = ['Date', 'Breakfast', 'Lunch', 'Dinner', 'Total'];
-    const rows    = [headers, ...dailyStats.map(d => [
+    const rows = [headers, ...dailyStats.map(d => [
       d.date, String(d.Breakfast ?? 0), String(d.Lunch ?? 0),
       String(d.Dinner ?? 0), String(d.total ?? 0),
     ])];
@@ -115,7 +65,7 @@ export default function Reports({
   const handleFeedbackReport = () => {
     setDownloading('feedback');
     const headers = ['User', 'Email', 'Meal', 'Date', 'Overall', 'Staff', 'Hygiene', 'Items'];
-    const rows    = [headers, ...ratings.map(r => [
+    const rows = [headers, ...ratings.map(r => [
       r.userName, r.userEmail, r.mealName, r.mealDate,
       String(r.averageRating ?? ''), String(r.staffBehaviorRating ?? ''),
       String(r.hygieneRating ?? ''), JSON.stringify(r.itemRatings ?? {}),
@@ -127,7 +77,7 @@ export default function Reports({
   const handleComplaintsReport = () => {
     setDownloading('complaints');
     const headers = ['User', 'Email', 'Category', 'Status', 'Description', 'Date'];
-    const rows    = [headers, ...complaints.map(c => [
+    const rows = [headers, ...complaints.map(c => [
       c.userName, c.userEmail, c.category, c.status,
       c.complaintText, new Date(c.timestamp).toISOString(),
     ])];
@@ -138,7 +88,7 @@ export default function Reports({
   const handleUsersReport = () => {
     setDownloading('users');
     const headers = ['Name', 'Email', 'Total RSVPs', 'Total Ratings', 'Total Complaints', 'Last Active'];
-    const rows    = [headers, ...users.map(u => [
+    const rows = [headers, ...users.map(u => [
       u.name, u.email,
       String(u.totalRSVPs), String(u.totalRatings), String(u.totalComplaints),
       u.lastActive,
@@ -147,77 +97,128 @@ export default function Reports({
     setDownloading(null);
   };
 
+  const reports = [
+    {
+      id: 'attendance',
+      icon: <BarChart2 size={16} />,
+      title: 'Attendance Summary',
+      desc: 'Daily breakdown for the last 7 days by meal type.',
+      count: dailyStats.length,
+      color: '#38bdf8',
+      onDownload: handleAttendanceReport,
+    },
+    {
+      id: 'feedback',
+      icon: <Star size={16} />,
+      title: 'Feedback Analysis',
+      desc: 'Meal ratings including item scores, staff, and hygiene.',
+      count: ratings.length,
+      color: '#f59e0b',
+      onDownload: handleFeedbackReport,
+    },
+    {
+      id: 'complaints',
+      icon: <MessageSquare size={16} />,
+      title: 'Complaints Log',
+      desc: 'All grievances with category, status, and resolution trail.',
+      count: complaints.length,
+      color: '#f87171',
+      onDownload: handleComplaintsReport,
+    },
+    {
+      id: 'users',
+      icon: <Users size={16} />,
+      title: 'User Export',
+      desc: 'Full user registry with RSVP and activity statistics.',
+      count: users.length,
+      color: '#a78bfa',
+      onDownload: handleUsersReport,
+    },
+  ];
+
+  const summary = [
+    { label: 'Users', value: users.length, color: '#38bdf8' },
+    { label: 'Ratings', value: ratings.length, color: '#f59e0b' },
+    { label: 'Complaints', value: complaints.length, color: '#f87171' },
+    { label: 'Attendance Records', value: dailyStats.length, color: '#a78bfa' },
+  ];
+
   return (
-    <div className="space-y-6">
+    <div
+      style={{ fontFamily: "'Geist Mono', 'JetBrains Mono', 'Fira Code', monospace" }}
+      className="space-y-4"
+    >
 
       {/* ── Header ── */}
-      <div>
-        <h1 className="text-xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
-          Reports
-        </h1>
-        <p className="text-sm text-zinc-500 dark:text-zinc-400 mt-0.5">
-          Export live Firebase data as CSV
-        </p>
+      <div className="flex items-start justify-between border-b border-[#1f1f1f] pb-4">
+        <div>
+          <div className="text-[10px] tracking-[0.3em] text-[#555] uppercase mb-1">Export</div>
+          <h1 className="text-2xl text-[#e8e8e8] tracking-tight">Reports</h1>
+        </div>
+        <div className="text-[10px] text-[#444] tabular-nums">
+          {new Date().toLocaleDateString()}
+        </div>
+      </div>
+
+      {/* ── Summary row ── */}
+      <div className="grid grid-cols-4 gap-2">
+        {summary.map(({ label, value, color }) => (
+          <div key={label} className="border border-[#1a1a1a] bg-[#0d0d0d] p-4">
+            <div className="text-[10px] tracking-[0.2em] text-[#555] uppercase mb-2">{label}</div>
+            <div className="text-3xl font-bold tabular-nums leading-none" style={{ color }}>{value}</div>
+          </div>
+        ))}
       </div>
 
       {/* ── Report cards ── */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <ReportCard
-          icon={<BarChart2 size={18} />}
-          title="Attendance Summary"
-          desc="Daily breakdown for the last 7 days by meal type."
-          badge="CSV"
-          count={dailyStats.length}
-          loading={downloading === 'attendance'}
-          onDownload={handleAttendanceReport}
-        />
-        <ReportCard
-          icon={<Star size={18} />}
-          title="Feedback Analysis"
-          desc="Meal ratings including item scores, staff, and hygiene."
-          badge="CSV"
-          count={ratings.length}
-          loading={downloading === 'feedback'}
-          onDownload={handleFeedbackReport}
-        />
-        <ReportCard
-          icon={<MessageSquare size={18} />}
-          title="Complaints Log"
-          desc="All grievances with category, status, and resolution trail."
-          badge="CSV"
-          count={complaints.length}
-          loading={downloading === 'complaints'}
-          onDownload={handleComplaintsReport}
-        />
-        <ReportCard
-          icon={<FileText size={18} />}
-          title="User Export"
-          desc="Full user registry with RSVP and activity statistics."
-          badge="CSV"
-          count={users.length}
-          loading={downloading === 'users'}
-          onDownload={handleUsersReport}
-        />
+      <div className="grid grid-cols-2 gap-2">
+        {reports.map((r) => (
+          <div key={r.id} className="border border-[#1a1a1a] bg-[#0d0d0d] p-5 flex flex-col gap-4 group hover:border-[#2a2a2a] transition-colors">
+
+            {/* Top row */}
+            <div className="flex items-start justify-between">
+              <div
+                className="p-2 border flex items-center justify-center"
+                style={{ color: r.color, borderColor: `${r.color}25`, background: `${r.color}10` }}
+              >
+                {r.icon}
+              </div>
+              <span className="text-[9px] tracking-[0.2em] text-[#444] uppercase border border-[#1f1f1f] px-2 py-1">
+                CSV
+              </span>
+            </div>
+
+            {/* Info */}
+            <div className="flex-1">
+              <div className="text-[13px] text-[#ccc] mb-1.5">{r.title}</div>
+              <div className="text-[11px] text-[#555] leading-relaxed">{r.desc}</div>
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between pt-3 border-t border-[#111]">
+              <span className="text-[10px] text-[#444] tabular-nums">{r.count} records</span>
+              <button
+                onClick={r.onDownload}
+                disabled={downloading === r.id}
+                className="flex items-center gap-2 px-3 py-2 text-[11px] tracking-[0.1em] uppercase font-bold transition-all disabled:opacity-40"
+                style={{
+                  color: r.color,
+                  border: `1px solid ${r.color}30`,
+                  background: `${r.color}10`,
+                }}
+              >
+                <Download size={12} />
+                {downloading === r.id ? 'Exporting...' : 'Download'}
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
 
-      {/* ── Summary stats ── */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-100 dark:border-zinc-800 rounded-xl p-6 transition-colors">
-        <h2 className="text-[13px] font-semibold uppercase tracking-widest text-zinc-400 dark:text-zinc-500 mb-4">
-          Data Summary
-        </h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-          {[
-            { label: 'Users',              value: users.length       },
-            { label: 'Ratings',            value: ratings.length     },
-            { label: 'Complaints',         value: complaints.length  },
-            { label: 'Attendance Records', value: dailyStats.length  },
-          ].map(({ label, value }) => (
-            <div key={label}>
-              <p className="text-[11px] font-semibold uppercase tracking-widest text-zinc-400 mb-1">{label}</p>
-              <p className="text-2xl font-bold tracking-tight text-zinc-900 dark:text-zinc-100">{value}</p>
-            </div>
-          ))}
-        </div>
+      {/* ── Footer ── */}
+      <div className="border-t border-[#111] pt-3 flex items-center justify-between">
+        <span className="text-[9px] text-[#2a2a2a] tracking-widest uppercase">Firebase · Live Data</span>
+        <span className="text-[9px] text-[#2a2a2a] tabular-nums">{todayStr()}</span>
       </div>
     </div>
   );
