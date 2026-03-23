@@ -1,7 +1,7 @@
-
 import { useState, useEffect, useRef } from 'react';
 import { db, rtdb } from '../lib/firebase';
 import { Complaint, Rating, User, Activity, DailyStats } from '../types';
+import { Rebate } from '../pages/Rebates';
 import { getActiveMealForDashboard, MEAL_ORDER, MealType } from '../lib/menuUtils';
 
 export function useFirebaseData(userId: string | null) {
@@ -16,11 +16,12 @@ export function useFirebaseData(userId: string | null) {
   const [complaints, setComplaints] = useState<Complaint[]>([]);
   const [ratings, setRatings] = useState<Rating[]>([]);
   const [users, setUsers] = useState<User[]>([]);
+  const [rebates, setRebates] = useState<Rebate[]>([]);
   const [adminCount, setAdminCount] = useState(0);
   const [recentActivities, setRecentActivities] = useState<Activity[]>([]);
   const [dailyStats, setDailyStats] = useState<DailyStats[]>([]);
   const [loading, setLoading] = useState(true);
-  const loadedRef = useRef({ complaints: false, ratings: false, users: false, attendance: false, admins: false });
+  const loadedRef = useRef({ complaints: false, ratings: false, users: false, attendance: false, admins: false, rebates: false });
 
   useEffect(() => {
     if (!userId) {
@@ -28,7 +29,7 @@ export function useFirebaseData(userId: string | null) {
       return;
     }
     setLoading(true);
-    loadedRef.current = { complaints: false, ratings: false, users: false, attendance: false, admins: false };
+    loadedRef.current = { complaints: false, ratings: false, users: false, attendance: false, admins: false, rebates: false };
 
     const checkAllLoaded = () => {
       if (Object.values(loadedRef.current).every(Boolean)) setLoading(false);
@@ -68,9 +69,9 @@ export function useFirebaseData(userId: string | null) {
     };
 
     // 1. Determine active meal/date strictly from RTDB attendance (chronological), and wire live listeners.
-    let attendanceRef: firebase.database.Reference | null = null;
-    let onAttendanceValue: ((snapshot: firebase.database.DataSnapshot) => void) | null = null;
-    const mealRefs: firebase.database.Reference[] = [];
+    let attendanceRef: any | null = null;
+    let onAttendanceValue: ((snapshot: any) => void) | null = null;
+    const mealRefs: any[] = [];
 
     (async () => {
       const todayStr = new Date().toISOString().split('T')[0];
@@ -134,7 +135,7 @@ export function useFirebaseData(userId: string | null) {
 
         // Live Attendance Count & per-meal counts for the resolved active date.
         attendanceRef = rtdb.ref(`attendance/${activeDate}/${activeMeal}`);
-        onAttendanceValue = (snapshot: firebase.database.DataSnapshot) => {
+        onAttendanceValue = (snapshot: any) => {
           const raw = snapshot.val();
           const yesIds = extractYesUserIds(raw);
           setAttendanceCount(yesIds.length);
@@ -253,6 +254,43 @@ export function useFirebaseData(userId: string | null) {
       checkAllLoaded();
     });
 
+    // 7. Rebates from Firestore
+    const setupRebates = () => {
+      const q = db.collection("rebates").limit(200);
+      return q.onSnapshot((snapshot) => {
+        const items = snapshot.docs.map(doc => {
+          const d = doc.data();
+          return {
+            id: doc.id,
+            userName: d.userName ?? 'Unknown',
+            userEmail: d.userEmail ?? '',
+            userId: d.userId ?? '',
+            startDate: d.startDate ?? null,
+            endDate: d.endDate ?? null,
+            reason: d.reason ?? '',
+            totalDays: d.totalDays ?? 0,
+            status: d.status ?? 'Pending',
+            managerNote: d.managerNote ?? null,
+            timestamp: d.timestamp ?? null,
+            updatedAt: d.updatedAt ?? null,
+          } as Rebate;
+        });
+        // Pending first, then most-recently-updated
+        items.sort((a, b) => {
+          const order = { Pending: 0, Approved: 1, Rejected: 2 };
+          return (order[a.status] ?? 99) - (order[b.status] ?? 99);
+        });
+        setRebates(items);
+        loadedRef.current.rebates = true;
+        checkAllLoaded();
+      }, (error) => {
+        console.warn("Error fetching rebates. Ensure your UID is in the 'admins' collection.", error.message);
+        loadedRef.current.rebates = true;
+        checkAllLoaded();
+      });
+    };
+    const unsubscribeRebates = setupRebates();
+
     return () => {
       if (attendanceRef && onAttendanceValue) {
         attendanceRef.off('value', onAttendanceValue);
@@ -261,6 +299,7 @@ export function useFirebaseData(userId: string | null) {
       usersRef.off('value', onUsersValue);
       unsubscribeComplaints();
       unsubscribeRatings();
+      unsubscribeRebates();
     };
   }, [userId]);
 
@@ -294,7 +333,8 @@ export function useFirebaseData(userId: string | null) {
     attendanceByMeal, 
     attendanceUserIds,
     activeMealInfo, 
-    complaints, 
+    complaints,
+    rebates,
     ratings, 
     users, 
     adminCount, 

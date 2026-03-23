@@ -1,13 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import {
   LayoutDashboard, Users, MessageSquare, Star, ClipboardList, Settings,
-  Moon, Sun, Menu, LogOut
+  Moon, Sun, Menu, LogOut, Receipt
 } from 'lucide-react';
 import { auth } from './lib/firebase';
 import Dashboard from './pages/Dashboard';
 import Attendance from './pages/Attendance';
 import Ratings from './pages/Ratings';
 import Complaints from './pages/Complaints';
+import Rebates from './pages/Rebates';
 import UsersPage from './pages/Users';
 import Reports from './pages/Reports';
 import Login from './pages/Login';
@@ -20,6 +21,7 @@ const NAV_ITEMS = [
   { id: 'attendance', label: 'Attendance', icon: ClipboardList   },
   { id: 'ratings',    label: 'Ratings',    icon: Star            },
   { id: 'complaints', label: 'Complaints', icon: MessageSquare   },
+  { id: 'rebates',    label: 'Rebates',    icon: Receipt         },
   { id: 'users',      label: 'Users',      icon: Users           },
   { id: 'reports',    label: 'Reports',    icon: ClipboardList   },
   { id: 'settings',   label: 'Settings',   icon: Settings        },
@@ -60,6 +62,7 @@ export default function App() {
     complaints,
     ratings,
     users,
+    rebates,
     adminCount,
     recentActivities,
     dailyStats,
@@ -99,6 +102,7 @@ export default function App() {
         );
       case 'ratings':    return <Ratings liveRatings={ratings} />;
       case 'complaints': return <Complaints liveComplaints={complaints} />;
+      case 'rebates':    return <Rebates liveRebates={rebates ?? []} />;
       case 'users':      return <UsersPage liveUsers={users} adminCount={adminCount} />;
       case 'reports':
         return (
